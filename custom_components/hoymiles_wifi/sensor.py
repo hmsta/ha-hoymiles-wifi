@@ -280,7 +280,7 @@ HOYMILES_SENSORS = [
         conversion_factor=0.01,
     ),
     HoymilesSensorEntityDescription(
-        key="tgs_data[<inverter_count>.current_phase_A",
+        key="tgs_data[<inverter_count>].current_phase_A",
         translation_key="current_phase_A",
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
         device_class=SensorDeviceClass.CURRENT,
@@ -288,7 +288,7 @@ HOYMILES_SENSORS = [
         conversion_factor=0.01,
     ),
     HoymilesSensorEntityDescription(
-        key="tgs_data[<inverter_count>.current_phase_B",
+        key="tgs_data[<inverter_count>].current_phase_B",
         translation_key="current_phase_B",
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
         device_class=SensorDeviceClass.CURRENT,
@@ -296,7 +296,7 @@ HOYMILES_SENSORS = [
         conversion_factor=0.01,
     ),
     HoymilesSensorEntityDescription(
-        key="tgs_data[<inverter_count>.current_phase_C",
+        key="tgs_data[<inverter_count>].current_phase_C",
         translation_key="current_phase_C",
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
         device_class=SensorDeviceClass.CURRENT,
