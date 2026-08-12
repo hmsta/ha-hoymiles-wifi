@@ -8,6 +8,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST
+from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
@@ -70,6 +71,25 @@ def _apply_meter_type_override(meters: list[dict], meter_type: str) -> list[dict
     return [{**meter, "device_type": device_type} for meter in meters]
 
 
+def _filter_duplicate_meters(
+    hass: HomeAssistant, meters: list[dict], current_entry_id: str | None = None
+) -> list[dict]:
+    """Remove meters already configured by another Hoymiles entry."""
+    configured_meter_serials = {
+        meter.get("meter_serial_number")
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if entry.entry_id != current_entry_id
+        for meter in entry.data.get(CONF_METERS, [])
+        if meter.get("meter_serial_number")
+    }
+
+    return [
+        meter
+        for meter in meters
+        if meter.get("meter_serial_number") not in configured_meter_serials
+    ]
+
+
 class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
     """Hoymiles Inverter config flow."""
 
@@ -104,6 +124,7 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
             else:
                 meters = _apply_meter_type_override(meters, meter_type)
+                meters = _filter_duplicate_meters(self.hass, meters)
                 await self.async_set_unique_id(dtu_sn)
                 self._abort_if_unique_id_configured()
 
@@ -166,6 +187,7 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 meters = _apply_meter_type_override(meters, meter_type)
                 if dtu_sn != entry.unique_id:
                     return self.async_abort(reason="another_device")
+                meters = _filter_duplicate_meters(self.hass, meters, entry.entry_id)
 
                 data = {
                     CONF_HOST: host,

@@ -178,6 +178,26 @@ async def async_remove_config_entry_device(
     hass: HomeAssistant, config_entry: ConfigEntry, device_entry: DeviceEntry
 ) -> bool:
     """Remove a config entry from a device."""
+    meters = config_entry.data.get(CONF_METERS, [])
+    meter_serials = {
+        identifier
+        for domain, identifier in device_entry.identifiers
+        if domain == DOMAIN
+    }
+
+    updated_meters = [
+        meter
+        for meter in meters
+        if meter.get("meter_serial_number") not in meter_serials
+    ]
+
+    if len(updated_meters) != len(meters):
+        hass.config_entries.async_update_entry(
+            config_entry,
+            data={**config_entry.data, CONF_METERS: updated_meters},
+            version=CONFIG_VERSION,
+        )
+
     return True
 
 
