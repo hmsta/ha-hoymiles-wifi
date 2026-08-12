@@ -44,7 +44,7 @@ async def test_remove_meter_device_updates_config_entry(hass):
     entry.add_to_hass(hass)
     device_entry = DeviceEntry(
         id="meter-device",
-        identifiers={(DOMAIN, meter_serial)},
+        identifiers={(DOMAIN, meter_serial.upper())},
     )
 
     assert await async_remove_config_entry_device(hass, entry, device_entry) is True

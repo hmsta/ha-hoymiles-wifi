@@ -180,7 +180,7 @@ async def async_remove_config_entry_device(
     """Remove a config entry from a device."""
     meters = config_entry.data.get(CONF_METERS, [])
     meter_serials = {
-        identifier
+        str(identifier).lower()
         for domain, identifier in device_entry.identifiers
         if domain == DOMAIN
     }
@@ -188,7 +188,7 @@ async def async_remove_config_entry_device(
     updated_meters = [
         meter
         for meter in meters
-        if meter.get("meter_serial_number") not in meter_serials
+        if str(meter.get("meter_serial_number")).lower() not in meter_serials
     ]
 
     if len(updated_meters) != len(meters):

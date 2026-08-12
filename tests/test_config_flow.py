@@ -85,6 +85,7 @@ def _add_config_entry_with_meter(
     entry_id: str = "existing-entry",
     dtu_serial_number: str = DTU_TEST_SERIAL_NUMBER,
     meter_type: int = 1,
+    meter_serial_number: str = METER_SERIAL_NUMBER,
 ) -> MockConfigEntry:
     """Add a Hoymiles config entry with one stored meter."""
     entry = MockConfigEntry(
@@ -96,7 +97,7 @@ def _add_config_entry_with_meter(
             CONF_DTU_SERIAL_NUMBER: dtu_serial_number,
             CONF_METERS: [
                 {
-                    "meter_serial_number": METER_SERIAL_NUMBER,
+                    "meter_serial_number": meter_serial_number,
                     "device_type": meter_type,
                 }
             ],
@@ -207,7 +208,7 @@ async def test_form_keeps_new_meter(hass: HomeAssistant) -> None:
 async def test_form_skips_meter_known_by_another_dtu(hass: HomeAssistant) -> None:
     """Test second DTU skips a meter already configured by another DTU."""
 
-    _add_config_entry_with_meter(hass)
+    _add_config_entry_with_meter(hass, meter_serial_number=METER_SERIAL_NUMBER.upper())
 
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}

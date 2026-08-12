@@ -76,7 +76,7 @@ def _filter_duplicate_meters(
 ) -> list[dict]:
     """Remove meters already configured by another Hoymiles entry."""
     configured_meter_serials = {
-        meter.get("meter_serial_number")
+        str(meter.get("meter_serial_number")).lower()
         for entry in hass.config_entries.async_entries(DOMAIN)
         if entry.entry_id != current_entry_id
         for meter in entry.data.get(CONF_METERS, [])
@@ -86,7 +86,7 @@ def _filter_duplicate_meters(
     return [
         meter
         for meter in meters
-        if meter.get("meter_serial_number") not in configured_meter_serials
+        if str(meter.get("meter_serial_number")).lower() not in configured_meter_serials
     ]
 
 
