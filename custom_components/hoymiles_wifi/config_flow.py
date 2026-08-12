@@ -90,6 +90,120 @@ def _filter_duplicate_meters(
     ]
 
 
+def _normalize_serial(serial_number: Any) -> str:
+    """Normalize a serial number for comparisons."""
+    return str(serial_number).lower()
+
+
+def _detected_inverter_serials(
+    single_phase_inverters: list,
+    three_phase_inverters: list,
+    ports: list[dict],
+    hybrid_inverters: list[dict],
+) -> set[str]:
+    """Collect all inverter serial numbers detected by a DTU."""
+    return {
+        _normalize_serial(serial_number)
+        for serial_number in (
+            [
+                *single_phase_inverters,
+                *three_phase_inverters,
+                *(port.get("inverter_serial_number") for port in ports),
+                *(
+                    inverter.get("inverter_serial_number")
+                    for inverter in hybrid_inverters
+                ),
+            ]
+        )
+        if serial_number
+    }
+
+
+def _remove_claimed_inverters_from_data(
+    data: dict, claimed_inverter_serials: set[str]
+) -> tuple[dict, bool]:
+    """Remove inverter data claimed by another Hoymiles entry."""
+    updated_data = {**data}
+    claimed_inverter_serials = {
+        _normalize_serial(serial_number)
+        for serial_number in claimed_inverter_serials
+        if serial_number
+    }
+
+    updated_inverters = [
+        inverter
+        for inverter in data.get(CONF_INVERTERS, [])
+        if _normalize_serial(inverter) not in claimed_inverter_serials
+    ]
+    updated_three_phase_inverters = [
+        inverter
+        for inverter in data.get(CONF_THREE_PHASE_INVERTERS, [])
+        if _normalize_serial(inverter) not in claimed_inverter_serials
+    ]
+    updated_hybrid_inverters = [
+        inverter
+        for inverter in data.get(CONF_HYBRID_INVERTERS, [])
+        if _normalize_serial(inverter.get("inverter_serial_number"))
+        not in claimed_inverter_serials
+    ]
+    updated_ports = [
+        port
+        for port in data.get(CONF_PORTS, [])
+        if _normalize_serial(port.get("inverter_serial_number"))
+        not in claimed_inverter_serials
+    ]
+
+    changed = (
+        updated_inverters != data.get(CONF_INVERTERS, [])
+        or updated_three_phase_inverters != data.get(CONF_THREE_PHASE_INVERTERS, [])
+        or updated_hybrid_inverters != data.get(CONF_HYBRID_INVERTERS, [])
+        or updated_ports != data.get(CONF_PORTS, [])
+    )
+
+    if changed:
+        updated_data[CONF_INVERTERS] = updated_inverters
+        updated_data[CONF_THREE_PHASE_INVERTERS] = updated_three_phase_inverters
+        updated_data[CONF_HYBRID_INVERTERS] = updated_hybrid_inverters
+        updated_data[CONF_PORTS] = updated_ports
+
+    return updated_data, changed
+
+
+async def _claim_detected_inverters(
+    hass: HomeAssistant,
+    single_phase_inverters: list,
+    three_phase_inverters: list,
+    ports: list[dict],
+    hybrid_inverters: list[dict],
+    current_entry_id: str | None = None,
+) -> None:
+    """Move detected inverters from other Hoymiles entries to this DTU."""
+    claimed_inverter_serials = _detected_inverter_serials(
+        single_phase_inverters, three_phase_inverters, ports, hybrid_inverters
+    )
+    if not claimed_inverter_serials:
+        return
+
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.entry_id == current_entry_id:
+            continue
+
+        updated_data, changed = _remove_claimed_inverters_from_data(
+            entry.data, claimed_inverter_serials
+        )
+        if not changed:
+            continue
+
+        hass.config_entries.async_update_entry(
+            entry, data=updated_data, version=CONFIG_VERSION
+        )
+        if not await hass.config_entries.async_reload(entry.entry_id):
+            _LOGGER.warning(
+                "Failed to reload Hoymiles entry %s after moving inverter ownership",
+                entry.entry_id,
+            )
+
+
 class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
     """Hoymiles Inverter config flow."""
 
@@ -127,6 +241,13 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 meters = _filter_duplicate_meters(self.hass, meters)
                 await self.async_set_unique_id(dtu_sn)
                 self._abort_if_unique_id_configured()
+                await _claim_detected_inverters(
+                    self.hass,
+                    single_phase_inverters,
+                    three_phase_inverters,
+                    ports,
+                    hybrid_inverters,
+                )
 
                 return self.async_create_entry(
                     title=host,
@@ -188,6 +309,14 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 if dtu_sn != entry.unique_id:
                     return self.async_abort(reason="another_device")
                 meters = _filter_duplicate_meters(self.hass, meters, entry.entry_id)
+                await _claim_detected_inverters(
+                    self.hass,
+                    single_phase_inverters,
+                    three_phase_inverters,
+                    ports,
+                    hybrid_inverters,
+                    entry.entry_id,
+                )
 
                 data = {
                     CONF_HOST: host,
