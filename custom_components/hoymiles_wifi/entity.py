@@ -96,7 +96,10 @@ class HoymilesEntity(Entity):
             model=device_model,
         )
 
-        if not self.entity_description.is_dtu_sensor:
+        if (
+            not self.entity_description.is_dtu_sensor
+            and "meter" not in self.entity_description.key
+        ):
             device_info["via_device"] = (DOMAIN, dtu_serial_number)
 
         self._attr_device_info = device_info

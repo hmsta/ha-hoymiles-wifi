@@ -86,7 +86,7 @@ def test_meter_device_name_includes_serial() -> None:
     assert device_info["name"] == "Meter 10C012931030"
     assert device_info["identifiers"] == {(DOMAIN, meter_serial)}
     assert device_info["serial_number"] == "10C012931030"
-    assert device_info["via_device"] == (DOMAIN, DTU_SERIAL_NUMBER)
+    assert "via_device" not in device_info
 
 
 def test_meter_device_uses_explicit_model_name() -> None:

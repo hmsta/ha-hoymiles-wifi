@@ -34,6 +34,7 @@ from .const import (
     HASS_DATA_COORDINATOR,
     HASS_DTU,
     HASS_ENERGY_STORAGE_DATA_COORDINATOR,
+    HASS_SHARED_METER_COORDINATOR,
 )
 from .coordinator import (
     HoymilesAppInfoUpdateCoordinator,
@@ -43,6 +44,7 @@ from .coordinator import (
 )
 from .error import CannotConnect
 from .services import async_handle_set_bms_mode
+from .shared_meter import HoymilesSharedMeterCoordinator
 from .util import async_get_config_entry_data_for_host
 
 _LOGGER = logging.getLogger(__name__)
@@ -83,6 +85,10 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     """Set up this integration using UI."""
 
     hass.data.setdefault(DOMAIN, {})
+    shared_meter_coordinator = hass.data[DOMAIN].get(HASS_SHARED_METER_COORDINATOR)
+    if shared_meter_coordinator is None:
+        shared_meter_coordinator = HoymilesSharedMeterCoordinator(hass)
+        hass.data[DOMAIN][HASS_SHARED_METER_COORDINATOR] = shared_meter_coordinator
 
     hass_data = dict(config_entry.data)
 
@@ -110,7 +116,11 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
 
     if single_phase_inverters or three_phase_inverters or meters:
         data_coordinator = HoymilesRealDataUpdateCoordinator(
-            hass, dtu=dtu, config_entry=config_entry, update_interval=update_interval
+            hass,
+            dtu=dtu,
+            config_entry=config_entry,
+            update_interval=update_interval,
+            shared_meter_coordinator=shared_meter_coordinator,
         )
         hass_data[HASS_DATA_COORDINATOR] = data_coordinator
 
@@ -197,6 +207,12 @@ async def async_remove_config_entry_device(
             data={**config_entry.data, CONF_METERS: updated_meters},
             version=CONFIG_VERSION,
         )
+        shared_meter_coordinator = hass.data.get(DOMAIN, {}).get(
+            HASS_SHARED_METER_COORDINATOR
+        )
+        if shared_meter_coordinator is not None:
+            for meter_serial in meter_serials:
+                shared_meter_coordinator.remove_meter(meter_serial)
 
     return True
 

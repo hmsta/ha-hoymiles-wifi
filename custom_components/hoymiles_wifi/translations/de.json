@@ -92,6 +92,9 @@
       "meter_kind": {
         "name": "Zählermodell"
       },
+      "last_source_dtu": {
+        "name": "Letzte Quell-DTU"
+      },
       "mac_address": {
         "name": "MAC-Adresse"
       },

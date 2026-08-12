@@ -49,11 +49,28 @@ class HoymilesDataUpdateCoordinator(DataUpdateCoordinator):
 class HoymilesRealDataUpdateCoordinator(HoymilesDataUpdateCoordinator):
     """Data coordinator for Hoymiles integration."""
 
+    def __init__(
+        self,
+        hass: homeassistant,
+        dtu: DTU,
+        config_entry: ConfigEntry,
+        update_interval: timedelta,
+        shared_meter_coordinator=None,
+    ) -> None:
+        """Initialize the real data coordinator."""
+        self._shared_meter_coordinator = shared_meter_coordinator
+        super().__init__(hass, dtu, config_entry, update_interval)
+
     async def _async_update_data(self):
         """Update data via library."""
         _LOGGER.debug("Hoymiles data coordinator update")
 
         response = await self._dtu.async_get_real_data_new()
+
+        if response and self._shared_meter_coordinator is not None:
+            self._shared_meter_coordinator.update_from_real_data(
+                response, self._config_entry
+            )
 
         if not response:
             _LOGGER.debug(

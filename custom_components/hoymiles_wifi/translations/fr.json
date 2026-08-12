@@ -92,6 +92,9 @@
       "meter_kind": {
         "name": "Type de compteur"
       },
+      "last_source_dtu": {
+        "name": "Dernière DTU source"
+      },
       "mac_address": {
         "name": "Adresse MAC"
       },

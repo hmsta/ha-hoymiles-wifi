@@ -34,6 +34,7 @@ DEFAULT_APP_INFO_UPDATE_INTERVAL_SECONDS = 60 * 60 * 2
 
 
 HASS_DATA_COORDINATOR = "data_coordinator"
+HASS_SHARED_METER_COORDINATOR = "shared_meter_coordinator"
 HASS_CONFIG_COORDINATOR = "config_coordinator"
 HASS_APP_INFO_COORDINATOR = "app_info_coordinator"
 HASS_ENERGY_STORAGE_DATA_COORDINATOR = "energy_stroage_data_coordinator"

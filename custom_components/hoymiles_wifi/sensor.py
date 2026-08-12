@@ -46,6 +46,7 @@ from .const import (
     HASS_CONFIG_COORDINATOR,
     HASS_DATA_COORDINATOR,
     HASS_ENERGY_STORAGE_DATA_COORDINATOR,
+    HASS_SHARED_METER_COORDINATOR,
 )
 from .entity import (
     HoymilesCoordinatorEntity,
@@ -556,6 +557,12 @@ HOYMILES_SENSORS = [
         state_class=SensorStateClass.MEASUREMENT,
         conversion_factor=0.1,
         requires_device_type=DeviceType.THREE_PHASE_METER,
+    ),
+    HoymilesSensorEntityDescription(
+        key="meter_data[<meter_count>].last_source_dtu",
+        translation_key="last_source_dtu",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:access-point-network",
     ),
 ]
 
@@ -1162,6 +1169,9 @@ async def async_setup_entry(
 
     hass_data = hass.data[DOMAIN][config_entry.entry_id]
     data_coordinator = hass_data.get(HASS_DATA_COORDINATOR, None)
+    shared_meter_coordinator = hass.data[DOMAIN].get(
+        HASS_SHARED_METER_COORDINATOR, data_coordinator
+    )
     config_coordinator = hass_data.get(HASS_CONFIG_COORDINATOR, None)
     app_info_coordinator = hass_data.get(HASS_APP_INFO_COORDINATOR, None)
     energy_storage_data_coordinator = hass_data.get(
@@ -1178,7 +1188,7 @@ async def async_setup_entry(
 
     # Real Data Sensors
 
-    if inverters:
+    if inverters or meters:
         for description in HOYMILES_SENSORS:
             device_class = description.device_class
             if device_class == SensorDeviceClass.ENERGY:
@@ -1210,10 +1220,15 @@ async def async_setup_entry(
                 )
                 sensors.extend(sensor_entities)
             elif "meter" in description.key and meters:
+                if device_class == SensorDeviceClass.ENERGY:
+                    class_name = HoymilesSharedMeterEnergySensorEntity
+                else:
+                    class_name = HoymilesSharedMeterDataSensorEntity
+
                 sensor_entities = get_sensors_for_description(
                     config_entry,
                     description,
-                    data_coordinator,
+                    shared_meter_coordinator,
                     class_name,
                     dtu_serial_number,
                     [],
@@ -1609,6 +1624,115 @@ class HoymilesEnergySensorEntity(HoymilesDataSensorEntity, RestoreSensor):
 
         if self.entity_description.reset_at_midnight:
             self.schedule_midnight_reset(reset_sensor_value=False)
+
+
+class HoymilesSharedMeterMixin:
+    """Read meter values from the shared serial-keyed meter coordinator."""
+
+    def __init__(
+        self,
+        config_entry: ConfigEntry,
+        description: HoymilesSensorEntityDescription,
+        coordinator: HoymilesCoordinatorEntity,
+    ):
+        """Initialize shared meter lookup details before base sensor setup."""
+        self._meter_serial_number = str(description.serial_number).lower()
+        self._shared_meter_field_name = description.key.split("].", 1)[1]
+        super().__init__(config_entry, description, coordinator)
+
+    def _shared_meter_record(self) -> dict | None:
+        """Return the shared meter record for this entity."""
+        coordinator_data = getattr(self.coordinator, "data", None)
+        if not coordinator_data:
+            return None
+        if not hasattr(coordinator_data, "get"):
+            return None
+        return coordinator_data.get(self._meter_serial_number)
+
+    def update_state_value(self):
+        """Update the state value from the shared meter store."""
+        new_native_value = None
+        record = self._shared_meter_record()
+
+        if record is not None:
+            if self._shared_meter_field_name == "last_source_dtu":
+                new_native_value = record.get("last_source_dtu")
+            else:
+                new_native_value = record.get("values", {}).get(
+                    self._shared_meter_field_name
+                )
+
+        if (
+            new_native_value is None
+            and self.entity_description.device_class == SensorDeviceClass.ENERGY
+        ):
+            new_native_value = 0.0
+
+        if new_native_value is not None and self._conversion_factor is not None:
+            new_native_value *= self._conversion_factor
+
+        if (
+            new_native_value is not None
+            and new_native_value != 0.0
+            and self._version_translation_function is not None
+        ):
+            new_native_value = getattr(
+                hoymiles_wifi.hoymiles, self._version_translation_function
+            )(int(new_native_value))
+
+        if (
+            new_native_value is not None
+            and new_native_value != 0.0
+            and self._version_prefix is not None
+        ):
+            new_native_value = f"{self._version_prefix}{new_native_value}"
+
+        if (
+            new_native_value is not None
+            and self.entity_description.force_keep_maximum_within_day
+            and self._native_value is not None
+            and self._last_update_state is not None
+            and self._last_update_state.date() == datetime.now().date()
+        ):
+            new_native_value = max(new_native_value, self._native_value)
+
+        self._last_update_state = datetime.now()
+        self._native_value = new_native_value
+
+    @property
+    def extra_state_attributes(self):
+        """Return source metadata for the shared meter source diagnostic."""
+        if self._shared_meter_field_name != "last_source_dtu":
+            return None
+
+        record = self._shared_meter_record()
+        if record is None:
+            return {}
+
+        attribute_names = (
+            "last_source_host",
+            "last_source_config_entry_id",
+            "last_source_timestamp",
+            "last_source_updated_at",
+            "last_energy_source_dtu",
+            "last_energy_source_host",
+            "last_energy_source_config_entry_id",
+            "last_energy_source_timestamp",
+            "last_energy_updated_at",
+        )
+        return {name: record.get(name) for name in attribute_names}
+
+
+class HoymilesSharedMeterDataSensorEntity(
+    HoymilesSharedMeterMixin, HoymilesDataSensorEntity
+):
+    """Represents a meter sensor backed by the shared meter store."""
+
+
+class HoymilesSharedMeterEnergySensorEntity(
+    HoymilesSharedMeterMixin, HoymilesEnergySensorEntity
+):
+    """Represents a meter energy sensor backed by the shared meter store."""
 
 
 class HoymilesDiagnosticSensorEntity(

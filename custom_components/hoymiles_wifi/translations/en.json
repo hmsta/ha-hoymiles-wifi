@@ -92,6 +92,9 @@
       "meter_kind": {
         "name": "Meter kind"
       },
+      "last_source_dtu": {
+        "name": "Last source DTU"
+      },
       "mac_address": {
         "name": "MAC address"
       },
