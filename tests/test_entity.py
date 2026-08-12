@@ -1,6 +1,5 @@
 """Unit tests for Hoymiles entities."""
 
-from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -12,13 +11,6 @@ from custom_components.hoymiles_wifi.entity import (
 
 
 DTU_SERIAL_NUMBER = "4121a01953c8"
-
-
-@dataclass(frozen=True)
-class HybridEntityDescription(HoymilesEntityDescription):
-    """Entity description with hybrid inverter model information."""
-
-    model_name: str = None
 
 
 def _config_entry():
@@ -97,12 +89,27 @@ def test_meter_device_name_includes_serial() -> None:
     assert device_info["via_device"] == (DOMAIN, DTU_SERIAL_NUMBER)
 
 
+def test_meter_device_uses_explicit_model_name() -> None:
+    """Test meter device model can be overridden from detected meter type."""
+    meter_serial = "10c012931030"
+
+    device_info = _device_info(
+        HoymilesEntityDescription(
+            key="meter_data[0].phase_total_power",
+            serial_number=meter_serial,
+            model_name="DTSU666",
+        )
+    )
+
+    assert device_info["model"] == "DTSU666"
+
+
 def test_hybrid_inverter_device_name_includes_serial() -> None:
     """Test hybrid inverter device name includes serial number."""
     hybrid_serial = "1121a01b9999"
 
     device_info = _device_info(
-        HybridEntityDescription(
+        HoymilesEntityDescription(
             key="[0].power_flow.pv_to_load",
             serial_number=hybrid_serial,
             model_name="Hybrid model",

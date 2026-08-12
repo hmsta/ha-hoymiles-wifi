@@ -1313,8 +1313,12 @@ def get_sensors_for_description(
                 meter_type,
             ):
                 new_key = description.key.replace("<meter_count>", str(index))
+                meter_model = "DTSU666" if meter_type == 3 else "DDSU666"
                 updated_description = dataclasses.replace(
-                    description, key=new_key, serial_number=meter_serial
+                    description,
+                    key=new_key,
+                    serial_number=meter_serial,
+                    model_name=meter_model,
                 )
                 sensor = class_name(config_entry, updated_description, coordinator)
                 sensors.append(sensor)

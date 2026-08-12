@@ -41,6 +41,7 @@ class HoymilesEntityDescription(EntityDescription):
     port_number: int = None
     supported_dtu_types: list[DTUType] = None
     phase: str = None
+    model_name: str = None
 
 
 class HoymilesEntity(Entity):
@@ -72,15 +73,13 @@ class HoymilesEntity(Entity):
             device_model = get_dtu_model_name(self.entity_description.serial_number)
         else:
             if "meter" in self.entity_description.key:
-                device_model = get_meter_model_name(
-                    self.entity_description.serial_number
+                device_model = (
+                    self.entity_description.model_name
+                    or get_meter_model_name(self.entity_description.serial_number)
                 )
                 device_name = "Meter"
             else:
-                if (
-                    hasattr(self.entity_description, "model_name")
-                    and self.entity_description.model_name
-                ):
+                if self.entity_description.model_name:
                     device_model = self.entity_description.model_name
                     device_name = "Hybrid inverter"
                 else:

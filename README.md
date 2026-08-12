@@ -22,6 +22,8 @@ The setup and reconfigure flow includes a `Meter type` option:
 
 This is useful when a DTU reports a shared three-phase meter as single-phase even though the response contains phase B/C values.
 
+When a meter is configured as three-phase, the Home Assistant device model is shown as `DTSU666`. Single-phase meters are shown as `DDSU666`.
+
 ### Shared Meter Handling
 
 When adding or reconfiguring a DTU, detected meters are skipped automatically if another Hoymiles config entry already has the same meter serial number.
