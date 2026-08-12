@@ -7,7 +7,8 @@
         "data": {
           "host": "Hôte",
           "update_interval": "Intervalle de mise à jour (secondes)",
-          "timeout": "Délai d'attente (secondes)"
+          "timeout": "Délai d'attente (secondes)",
+          "meter_type": "Type de compteur"
         }
       },
       "reconfigure": {
@@ -16,7 +17,8 @@
         "data": {
           "host": "Hôte",
           "update_interval": "Intervalle de mise à jour (secondes)",
-          "timeout": "Délai d'attente (secondes)"
+          "timeout": "Délai d'attente (secondes)",
+          "meter_type": "Type de compteur"
         }
       }
     },
@@ -470,6 +472,13 @@
         "forced_discharge": "Mode décharge forcée",
         "peak_shaving": "Mode écrêtage de pointe",
         "time_of_use": "Mode heures d’utilisation"
+      }
+    },
+    "meter_type": {
+      "options": {
+        "auto": "Détection automatique",
+        "single_phase": "Monophasé",
+        "three_phase": "Triphasé"
       }
     }
   }

@@ -15,6 +15,7 @@ from .const import (
     CONF_HYBRID_INVERTERS,
     CONF_INVERTERS,
     CONF_METERS,
+    CONF_METER_TYPE,
     CONF_PORTS,
     CONF_THREE_PHASE_INVERTERS,
     CONF_TIMEOUT,
@@ -25,6 +26,9 @@ from .const import (
     DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_UPDATE_INTERVAL_SECONDS,
     DOMAIN,
+    METER_TYPE_AUTO,
+    METER_TYPE_SINGLE_PHASE,
+    METER_TYPE_THREE_PHASE,
     MIN_UPDATE_INTERVAL_SECONDS,
     MIN_TIMEOUT_SECONDS,
 )
@@ -50,8 +54,20 @@ DATA_SCHEMA = vol.Schema(
             vol.Coerce(int),
             vol.Range(min=timedelta(seconds=MIN_TIMEOUT_SECONDS).seconds),
         ),
+        vol.Optional(CONF_METER_TYPE, default=METER_TYPE_AUTO): vol.In(
+            [METER_TYPE_AUTO, METER_TYPE_SINGLE_PHASE, METER_TYPE_THREE_PHASE]
+        ),
     }
 )
+
+
+def _apply_meter_type_override(meters: list[dict], meter_type: str) -> list[dict]:
+    """Apply the configured meter type override to detected meters."""
+    if meter_type == METER_TYPE_AUTO:
+        return meters
+
+    device_type = 1 if meter_type == METER_TYPE_SINGLE_PHASE else 3
+    return [{**meter, "device_type": device_type} for meter in meters]
 
 
 class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
@@ -71,6 +87,7 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL_SECONDS
             )
             timeout = user_input.get(CONF_TIMEOUT, DEFAULT_TIMEOUT_SECONDS)
+            meter_type = user_input.get(CONF_METER_TYPE, METER_TYPE_AUTO)
 
             try:
                 (
@@ -86,6 +103,7 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             else:
+                meters = _apply_meter_type_override(meters, meter_type)
                 await self.async_set_unique_id(dtu_sn)
                 self._abort_if_unique_id_configured()
 
@@ -99,6 +117,7 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                         CONF_THREE_PHASE_INVERTERS: three_phase_inverters,
                         CONF_PORTS: ports,
                         CONF_METERS: meters,
+                        CONF_METER_TYPE: meter_type,
                         CONF_HYBRID_INVERTERS: hybrid_inverters,
                         CONF_IS_ENCRYPTED: is_encrypted,
                         CONF_ENC_RAND: enc_rand,
@@ -127,6 +146,7 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
             )
 
             timeout = user_input.get(CONF_TIMEOUT, DEFAULT_TIMEOUT_SECONDS)
+            meter_type = user_input.get(CONF_METER_TYPE, METER_TYPE_AUTO)
 
             try:
                 (
@@ -143,6 +163,7 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
 
             else:
+                meters = _apply_meter_type_override(meters, meter_type)
                 if dtu_sn != entry.unique_id:
                     return self.async_abort(reason="another_device")
 
@@ -154,6 +175,7 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                     CONF_THREE_PHASE_INVERTERS: three_phase_inverters,
                     CONF_PORTS: ports,
                     CONF_METERS: meters,
+                    CONF_METER_TYPE: meter_type,
                     CONF_HYBRID_INVERTERS: hybrid_inverters,
                     CONF_IS_ENCRYPTED: is_encrypted,
                     CONF_ENC_RAND: enc_rand,
@@ -189,6 +211,16 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                     ): vol.All(
                         vol.Coerce(int),
                         vol.Range(min=timedelta(seconds=MIN_TIMEOUT_SECONDS).seconds),
+                    ),
+                    vol.Optional(
+                        CONF_METER_TYPE,
+                        default=entry.data.get(CONF_METER_TYPE, METER_TYPE_AUTO),
+                    ): vol.In(
+                        [
+                            METER_TYPE_AUTO,
+                            METER_TYPE_SINGLE_PHASE,
+                            METER_TYPE_THREE_PHASE,
+                        ]
                     ),
                 }
             ),

@@ -7,7 +7,8 @@
         "data": {
           "host": "Host",
           "update_interval": "Aktualisierungsintervall (Sekunden)",
-          "timeout": "Timeout (Sekunden)"
+          "timeout": "Timeout (Sekunden)",
+          "meter_type": "Zählertyp"
         }
       },
       "reconfigure": {
@@ -16,7 +17,8 @@
         "data": {
           "host": "Host",
           "update_interval": "Aktualisierungsintervall (Sekunden)",
-          "timeout": "Timeout (Sekunden)"
+          "timeout": "Timeout (Sekunden)",
+          "meter_type": "Zählertyp"
         }
       }
     },
@@ -470,6 +472,13 @@
         "forced_discharge": "Erzwungener Entladebetrieb",
         "peak_shaving": "Lastspitzenkappungsmodus",
         "time_of_use": "Nutzungszeitmodus"
+      }
+    },
+    "meter_type": {
+      "options": {
+        "auto": "Automatisch erkennen",
+        "single_phase": "Einphasig",
+        "three_phase": "Dreiphasig"
       }
     }
   }

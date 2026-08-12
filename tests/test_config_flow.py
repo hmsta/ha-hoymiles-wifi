@@ -10,9 +10,19 @@ from custom_components.hoymiles_wifi.const import (
     DOMAIN,
     CONF_UPDATE_INTERVAL,
     CONF_INVERTERS,
+    CONF_THREE_PHASE_INVERTERS,
     CONF_PORTS,
+    CONF_METERS,
+    CONF_METER_TYPE,
+    CONF_HYBRID_INVERTERS,
     CONF_DTU_SERIAL_NUMBER,
+    CONF_IS_ENCRYPTED,
+    CONF_ENC_RAND,
+    CONF_TIMEOUT,
+    DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_UPDATE_INTERVAL_SECONDS,
+    METER_TYPE_AUTO,
+    METER_TYPE_THREE_PHASE,
 )
 from custom_components.hoymiles_wifi.error import CannotConnect
 
@@ -40,7 +50,14 @@ MOCK_DATA_RESULT = {
     CONF_DTU_SERIAL_NUMBER: DTU_TEST_SERIAL_NUMBER,
     CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL_SECONDS,
     CONF_INVERTERS: [],
+    CONF_THREE_PHASE_INVERTERS: [],
     CONF_PORTS: [],
+    CONF_METERS: [],
+    CONF_METER_TYPE: METER_TYPE_AUTO,
+    CONF_HYBRID_INVERTERS: [],
+    CONF_IS_ENCRYPTED: False,
+    CONF_ENC_RAND: "",
+    CONF_TIMEOUT: DEFAULT_TIMEOUT_SECONDS,
 }
 
 
@@ -78,6 +95,43 @@ async def test_form_valid_input(hass: HomeAssistant) -> None:
     assert result2["data"] == MOCK_DATA_RESULT
     assert len(mock_setup_entry.mock_calls) == 1
     assert len(mock_async_get_real_data_new.mock_calls) == 1
+
+
+async def test_form_overrides_meter_type(hass: HomeAssistant) -> None:
+    """Test overriding the detected meter type."""
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {}
+
+    user_input = {**MOCK_DATA_STEP, CONF_METER_TYPE: METER_TYPE_THREE_PHASE}
+    data_with_meter = RealDataNew_pb2.RealDataNewReqDTO()
+    data_with_meter.device_serial_number = DTU_TEST_SERIAL_NUMBER
+    meter_data = data_with_meter.meter_data.add()
+    meter_data.serial_number = 12345678
+    meter_data.device_type = 1
+
+    with (
+        patch(
+            "custom_components.hoymiles_wifi.async_setup_entry",
+            return_value=True,
+        ),
+        patch(
+            "hoymiles_wifi.dtu.DTU.async_get_real_data_new",
+            return_value=data_with_meter,
+        ),
+    ):
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input,
+        )
+    await hass.async_block_till_done()
+
+    assert result2["type"] == FlowResultType.CREATE_ENTRY
+    assert result2["data"][CONF_METER_TYPE] == METER_TYPE_THREE_PHASE
+    assert result2["data"][CONF_METERS][0]["device_type"] == 3
 
 
 @pytest.mark.parametrize(

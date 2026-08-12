@@ -15,9 +15,14 @@ CONF_THREE_PHASE_INVERTERS = "three_phase_inverters"
 CONF_HYBRID_INVERTERS = "hybrid_inverters"
 CONF_PORTS = "ports"
 CONF_METERS = "meters"
+CONF_METER_TYPE = "meter_type"
 CONF_IS_ENCRYPTED = "is_encrypted"
 CONF_ENC_RAND = "enc_rand"
 CONF_TIMEOUT = "timeout"
+
+METER_TYPE_AUTO = "auto"
+METER_TYPE_SINGLE_PHASE = "single_phase"
+METER_TYPE_THREE_PHASE = "three_phase"
 
 DEFAULT_UPDATE_INTERVAL_SECONDS = 35
 MIN_UPDATE_INTERVAL_SECONDS = 1
