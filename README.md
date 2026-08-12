@@ -56,6 +56,28 @@ Some diagnostic entities are disabled by default because they are often useless 
 
 They can still be enabled manually from the Home Assistant entity registry if needed for troubleshooting.
 
+### Clearer Meter Energy Names
+
+The meter energy counters use clearer Home Assistant display names:
+
+- `meter_energy_total_consumed`: shown as `Energy imported`
+- `meter_energy_total_power`: shown as `Energy exported`
+
+The underlying Hoymiles data keys and Home Assistant entity unique IDs are unchanged.
+
+### Home Assistant Energy Dashboard
+
+For a setup where the Hoymiles meter reports signed grid power and negative power means export, the Home Assistant Energy Dashboard can be configured like this:
+
+- Solar production energy: `sensor.dtu_ac_daily_energy`
+- Solar production power: `sensor.dtu_ac_power`
+- Energy imported from grid: `sensor.meter_energy_total_consumed`
+- Energy exported to grid: `sensor.meter_energy_total_power`
+- Type of power measurement: `INVERTED`
+- Power measurement: `sensor.meter_phase_total_power`
+
+Home Assistant may create an inverted helper entity such as `sensor.meter_phase_total_power_inverted` from that power measurement setup.
+
 ## Supported Devices
 
 The custom component was successfully tested with:

@@ -150,7 +150,7 @@
         "name": "Power factor total"
       },
       "energy_total_power": {
-        "name": "Energy total power"
+        "name": "Energy exported"
       },
       "energy_phase_A": {
         "name": "Energy phase A"
@@ -162,7 +162,7 @@
         "name": "Energy phase C"
       },
       "energy_total_consumed": {
-        "name": "Energy total consumed"
+        "name": "Energy imported"
       },
       "energy_phase_A_consumed": {
         "name": "Energy phase A consumed"
