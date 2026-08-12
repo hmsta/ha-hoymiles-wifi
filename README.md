@@ -8,6 +8,41 @@ It uses the [hoymiles-wifi](https://github.com/suaveolent/hoymiles-wifi) Python 
 
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/suaveolent)
 
+## Changes Made in This Fork
+
+This fork keeps the upstream Hoymiles integration behavior, with a few local changes for larger multi-DTU installations.
+
+### Meter Type Override
+
+The setup and reconfigure flow includes a `Meter type` option:
+
+- `Auto-detect`: keep the meter type reported by the DTU.
+- `Single-phase`: force detected meters to single-phase.
+- `Three-phase`: force detected meters to three-phase.
+
+This is useful when a DTU reports a shared three-phase meter as single-phase even though the response contains phase B/C values.
+
+### Shared Meter Handling
+
+When adding or reconfiguring a DTU, detected meters are skipped automatically if another Hoymiles config entry already has the same meter serial number.
+
+This avoids creating duplicate meter entities for installations where several DTUs report the same physical meter. The first configured DTU keeps the meter; later DTUs still add their inverter and panel entities, but do not add duplicate meter entities.
+
+If the meter should be moved to another DTU, remove the meter device from the current DTU entry in Home Assistant first. The integration removes that meter from the stored config entry data, allowing another DTU to claim it during reconfigure.
+
+### Serial-Based Device Names
+
+Hoymiles devices now use serial-based default names:
+
+- `DTU <serial>`
+- `Inverter <serial>`
+- `Meter <serial>`
+- `Hybrid inverter <serial>`
+
+For newly created devices, this should also make generated entity IDs easier to identify, for example `sensor.inverter_1421a01a4525_ac_current` instead of `sensor.inverter_ac_current_12`.
+
+Existing Home Assistant device and entity registry entries may keep their current names because Home Assistant stores registry names separately.
+
 ## Supported Devices
 
 The custom component was successfully tested with:
