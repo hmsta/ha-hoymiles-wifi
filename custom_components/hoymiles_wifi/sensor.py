@@ -206,6 +206,7 @@ HOYMILES_SENSORS = [
     HoymilesSensorEntityDescription(
         key="sgs_data[<inverter_count>].warning_number",
         translation_key="inverter_warning_number",
+        entity_registry_enabled_default=False,
     ),
     HoymilesSensorEntityDescription(
         key="tgs_data[<inverter_count>].active_power",
@@ -322,6 +323,7 @@ HOYMILES_SENSORS = [
     HoymilesSensorEntityDescription(
         key="tgs_data[<inverter_count>].warning_number",
         translation_key="inverter_warning_number",
+        entity_registry_enabled_default=False,
     ),
     HoymilesSensorEntityDescription(
         key="pv_data[<pv_count>].voltage",
@@ -365,6 +367,7 @@ HOYMILES_SENSORS = [
     HoymilesSensorEntityDescription(
         key="pv_data[<pv_count>].error_code",
         translation_key="port_error_code",
+        entity_registry_enabled_default=False,
     ),
     HoymilesSensorEntityDescription(
         key="meter_data[<meter_count>].phase_total_power",
@@ -617,6 +620,7 @@ APP_INFO_SENSORS: tuple[HoymilesSensorEntityDescription, ...] = (
         key="pv_info[<inverter_count>].pv_sw_version",
         translation_key="pv_sw_version",
         entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
         version_translation_function=FCTN_GENERATE_INVERTER_SW_VERSION_STRING,
         version_prefix="V",
         assume_state=True,
@@ -625,6 +629,7 @@ APP_INFO_SENSORS: tuple[HoymilesSensorEntityDescription, ...] = (
         key="pv_info[<inverter_count>].pv_hw_version",
         translation_key="pv_hw_version",
         entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
         version_translation_function=FCTN_GENERATE_INVERTER_HW_VERSION_STRING,
         version_prefix="H",
         assume_state=True,

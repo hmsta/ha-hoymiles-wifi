@@ -45,6 +45,17 @@ For newly created devices, this should also make generated entity IDs easier to 
 
 Existing Home Assistant device and entity registry entries may keep their current names because Home Assistant stores registry names separately.
 
+### Noisy Diagnostics Disabled by Default
+
+Some diagnostic entities are disabled by default because they are often useless or report `unknown`:
+
+- inverter warning number
+- inverter port error code
+- inverter hardware version
+- inverter software version
+
+They can still be enabled manually from the Home Assistant entity registry if needed for troubleshooting.
+
 ## Supported Devices
 
 The custom component was successfully tested with:
