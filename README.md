@@ -50,7 +50,9 @@ The custom component was successfully tested with:
 - Hoymiles HMS-400W-1T
 - Hoymiles HMS-800W-2T
 - Hoymiles HMS-1000W-2T
+- Hoymiles HMS-2000D-4T
 - Hoymiles HMS-2000DW-4T
+- Hoymiles HMT-2000-4T
 - Hoymiles DTU-WLite
 - Hoymiles DTU-Pro (S)
 - Hoymiles HAS-5.0LV-EUG1
@@ -75,7 +77,7 @@ The custom component was successfully tested with:
 
 4. Add a new custom repository:
 
-- **URL:** `https://github.com/suaveolent/ha-hoymiles-wifi`
+- **URL:** `https://github.com/hmsta/ha-hoymiles-wifi`
 
 - **Category:** Integration
 
