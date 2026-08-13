@@ -6,7 +6,7 @@ DOMAIN = "hoymiles_wifi"
 DOMAIN_DATA = f"{DOMAIN}_data"
 CONFIG_VERSION = 5
 
-ISSUE_URL = "https://github.com/suaveolent/ha-hoymiles-wifi/issues"
+ISSUE_URL = "https://github.com/hmsta/ha-hoymiles-wifi/issues"
 
 CONF_UPDATE_INTERVAL = "update_interval"
 CONF_DTU_SERIAL_NUMBER = "dtu_serial_number"

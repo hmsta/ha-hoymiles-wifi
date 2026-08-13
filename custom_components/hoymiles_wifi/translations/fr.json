@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connexion DTU Hoymiles",
-        "description": "Si vous avez besoin d'aide pour la configuration, consultez ici : https://github.com/suaveolent/ha-hoymiles-wifi",
+        "description": "Si vous avez besoin d'aide pour la configuration, consultez ici : https://github.com/hmsta/ha-hoymiles-wifi",
         "data": {
           "host": "Hôte",
           "update_interval": "Intervalle de mise à jour (secondes)",
@@ -13,7 +13,7 @@
       },
       "reconfigure": {
         "title": "Connexion DTU Hoymiles",
-        "description": "Si vous avez besoin d'aide pour la configuration, consultez ici : https://github.com/suaveolent/ha-hoymiles-wifi",
+        "description": "Si vous avez besoin d'aide pour la configuration, consultez ici : https://github.com/hmsta/ha-hoymiles-wifi",
         "data": {
           "host": "Hôte",
           "update_interval": "Intervalle de mise à jour (secondes)",
