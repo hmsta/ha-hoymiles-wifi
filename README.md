@@ -38,6 +38,14 @@ The meter device is shown as a standalone Hoymiles device, not as a child of one
 
 If the meter should be moved to another DTU, remove the meter device from the current DTU entry in Home Assistant first. The integration removes that meter from the stored config entry data, allowing another DTU to claim it during reconfigure.
 
+### Real-Data Startup Staggering
+
+Real-data polling can be delayed at Home Assistant startup or integration reload with the `Startup cooldown (seconds)` config option. Existing entries that do not have this value stored use the default of `120` seconds.
+
+After the startup cooldown, DTU real-data polls are staggered evenly across the configured update interval. For example, four DTUs with a 300 second update interval poll about 75 seconds apart, while each individual DTU still waits 300 seconds between its own real-data requests.
+
+This reduces startup bursts and gives shared meter data more frequent combined updates without polling any single DTU more often than its configured interval. Config and app-info refreshes are not staggered by this setting.
+
 ### Inverter Ownership Moves Between DTUs
 
 When adding or reconfiguring a DTU, detected inverters are automatically claimed by that DTU. If another Hoymiles config entry still has the same inverter serial number stored, the inverter and its port data are removed from the old entry and that entry is reloaded.

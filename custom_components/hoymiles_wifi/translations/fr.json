@@ -8,6 +8,7 @@
           "host": "Hôte",
           "update_interval": "Intervalle de mise à jour (secondes)",
           "timeout": "Délai d'attente (secondes)",
+          "startup_cooldown": "Délai de démarrage (secondes)",
           "meter_type": "Type de compteur"
         }
       },
@@ -18,6 +19,7 @@
           "host": "Hôte",
           "update_interval": "Intervalle de mise à jour (secondes)",
           "timeout": "Délai d'attente (secondes)",
+          "startup_cooldown": "Délai de démarrage (secondes)",
           "meter_type": "Type de compteur"
         }
       }

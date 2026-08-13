@@ -1498,7 +1498,11 @@ class HoymilesDataSensorEntity(HoymilesCoordinatorEntity, RestoreSensor):
         if self.coordinator is not None and (
             not hasattr(self.coordinator, "data") or self.coordinator.data is None
         ):
-            new_native_value = 0.0
+            new_native_value = (
+                None
+                if getattr(self.coordinator, "startup_refresh_pending", False)
+                else 0.0
+            )
         elif "[" in self._attribute_name and "]" in self._attribute_name:
             # Extracting the list index and attribute dynamically
             attribute_name, index = self._attribute_name.split("[")

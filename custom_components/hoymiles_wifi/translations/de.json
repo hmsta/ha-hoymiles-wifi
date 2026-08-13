@@ -8,6 +8,7 @@
           "host": "Host",
           "update_interval": "Aktualisierungsintervall (Sekunden)",
           "timeout": "Timeout (Sekunden)",
+          "startup_cooldown": "Startverzögerung (Sekunden)",
           "meter_type": "Zählertyp"
         }
       },
@@ -18,6 +19,7 @@
           "host": "Host",
           "update_interval": "Aktualisierungsintervall (Sekunden)",
           "timeout": "Timeout (Sekunden)",
+          "startup_cooldown": "Startverzögerung (Sekunden)",
           "meter_type": "Zählertyp"
         }
       }

@@ -19,6 +19,7 @@ from .const import (
     CONF_INVERTERS,
     CONF_METERS,
     CONF_PORTS,
+    CONF_STARTUP_COOLDOWN,
     CONF_THREE_PHASE_INVERTERS,
     CONF_TIMEOUT,
     CONF_UPDATE_INTERVAL,
@@ -27,6 +28,7 @@ from .const import (
     CONF_ENC_RAND,
     DEFAULT_APP_INFO_UPDATE_INTERVAL_SECONDS,
     DEFAULT_CONFIG_UPDATE_INTERVAL_SECONDS,
+    DEFAULT_STARTUP_COOLDOWN_SECONDS,
     DEFAULT_TIMEOUT_SECONDS,
     DOMAIN,
     HASS_APP_INFO_COORDINATOR,
@@ -94,6 +96,11 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
 
     host = config_entry.data.get(CONF_HOST)
     update_interval = timedelta(seconds=config_entry.data.get(CONF_UPDATE_INTERVAL))
+    startup_cooldown = timedelta(
+        seconds=config_entry.data.get(
+            CONF_STARTUP_COOLDOWN, DEFAULT_STARTUP_COOLDOWN_SECONDS
+        )
+    )
     single_phase_inverters = config_entry.data[CONF_INVERTERS]
     three_phase_inverters = config_entry.data.get(CONF_THREE_PHASE_INVERTERS, [])
     hybrid_inverters = config_entry.data.get(CONF_HYBRID_INVERTERS, [])
@@ -120,6 +127,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
             dtu=dtu,
             config_entry=config_entry,
             update_interval=update_interval,
+            startup_cooldown=startup_cooldown,
             shared_meter_coordinator=shared_meter_coordinator,
         )
         hass_data[HASS_DATA_COORDINATOR] = data_coordinator
@@ -167,7 +175,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
 
     if single_phase_inverters or three_phase_inverters or meters:
-        await data_coordinator.async_config_entry_first_refresh()
+        data_coordinator.schedule_startup_refresh()
         await config_coordinator.async_config_entry_first_refresh()
         await app_info_update_coordinator.async_config_entry_first_refresh()
     if hybrid_inverters:

@@ -9,6 +9,7 @@ CONFIG_VERSION = 5
 ISSUE_URL = "https://github.com/hmsta/ha-hoymiles-wifi/issues"
 
 CONF_UPDATE_INTERVAL = "update_interval"
+CONF_STARTUP_COOLDOWN = "startup_cooldown"
 CONF_DTU_SERIAL_NUMBER = "dtu_serial_number"
 CONF_INVERTERS = "inverters"
 CONF_THREE_PHASE_INVERTERS = "three_phase_inverters"
@@ -26,6 +27,8 @@ METER_TYPE_THREE_PHASE = "three_phase"
 
 DEFAULT_UPDATE_INTERVAL_SECONDS = 35
 MIN_UPDATE_INTERVAL_SECONDS = 1
+DEFAULT_STARTUP_COOLDOWN_SECONDS = 120
+MIN_STARTUP_COOLDOWN_SECONDS = 0
 DEFAULT_TIMEOUT_SECONDS = 10
 MIN_TIMEOUT_SECONDS = 1
 
@@ -35,6 +38,7 @@ DEFAULT_APP_INFO_UPDATE_INTERVAL_SECONDS = 60 * 60 * 2
 
 HASS_DATA_COORDINATOR = "data_coordinator"
 HASS_SHARED_METER_COORDINATOR = "shared_meter_coordinator"
+HASS_REAL_DATA_STAGGER_EPOCH = "real_data_stagger_epoch"
 HASS_CONFIG_COORDINATOR = "config_coordinator"
 HASS_APP_INFO_COORDINATOR = "app_info_coordinator"
 HASS_ENERGY_STORAGE_DATA_COORDINATOR = "energy_stroage_data_coordinator"

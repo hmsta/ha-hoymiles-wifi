@@ -18,6 +18,7 @@ from .const import (
     CONF_METERS,
     CONF_METER_TYPE,
     CONF_PORTS,
+    CONF_STARTUP_COOLDOWN,
     CONF_THREE_PHASE_INVERTERS,
     CONF_TIMEOUT,
     CONF_UPDATE_INTERVAL,
@@ -25,12 +26,14 @@ from .const import (
     CONF_ENC_RAND,
     CONFIG_VERSION,
     DEFAULT_TIMEOUT_SECONDS,
+    DEFAULT_STARTUP_COOLDOWN_SECONDS,
     DEFAULT_UPDATE_INTERVAL_SECONDS,
     DOMAIN,
     METER_TYPE_AUTO,
     METER_TYPE_SINGLE_PHASE,
     METER_TYPE_THREE_PHASE,
     MIN_UPDATE_INTERVAL_SECONDS,
+    MIN_STARTUP_COOLDOWN_SECONDS,
     MIN_TIMEOUT_SECONDS,
 )
 from .error import CannotConnect
@@ -54,6 +57,15 @@ DATA_SCHEMA = vol.Schema(
         ): vol.All(
             vol.Coerce(int),
             vol.Range(min=timedelta(seconds=MIN_TIMEOUT_SECONDS).seconds),
+        ),
+        vol.Optional(
+            CONF_STARTUP_COOLDOWN,
+            default=timedelta(seconds=DEFAULT_STARTUP_COOLDOWN_SECONDS).seconds,
+        ): vol.All(
+            vol.Coerce(int),
+            vol.Range(
+                min=timedelta(seconds=MIN_STARTUP_COOLDOWN_SECONDS).seconds
+            ),
         ),
         vol.Optional(CONF_METER_TYPE, default=METER_TYPE_AUTO): vol.In(
             [METER_TYPE_AUTO, METER_TYPE_SINGLE_PHASE, METER_TYPE_THREE_PHASE]
@@ -221,6 +233,9 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL_SECONDS
             )
             timeout = user_input.get(CONF_TIMEOUT, DEFAULT_TIMEOUT_SECONDS)
+            startup_cooldown = user_input.get(
+                CONF_STARTUP_COOLDOWN, DEFAULT_STARTUP_COOLDOWN_SECONDS
+            )
             meter_type = user_input.get(CONF_METER_TYPE, METER_TYPE_AUTO)
 
             try:
@@ -264,6 +279,7 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                         CONF_IS_ENCRYPTED: is_encrypted,
                         CONF_ENC_RAND: enc_rand,
                         CONF_TIMEOUT: timeout,
+                        CONF_STARTUP_COOLDOWN: startup_cooldown,
                     },
                 )
 
@@ -288,6 +304,12 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
             )
 
             timeout = user_input.get(CONF_TIMEOUT, DEFAULT_TIMEOUT_SECONDS)
+            startup_cooldown = user_input.get(
+                CONF_STARTUP_COOLDOWN,
+                entry.data.get(
+                    CONF_STARTUP_COOLDOWN, DEFAULT_STARTUP_COOLDOWN_SECONDS
+                ),
+            )
             meter_type = user_input.get(CONF_METER_TYPE, METER_TYPE_AUTO)
 
             try:
@@ -331,6 +353,7 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                     CONF_IS_ENCRYPTED: is_encrypted,
                     CONF_ENC_RAND: enc_rand,
                     CONF_TIMEOUT: timeout,
+                    CONF_STARTUP_COOLDOWN: startup_cooldown,
                 }
 
                 self.hass.config_entries.async_update_entry(
@@ -362,6 +385,20 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                     ): vol.All(
                         vol.Coerce(int),
                         vol.Range(min=timedelta(seconds=MIN_TIMEOUT_SECONDS).seconds),
+                    ),
+                    vol.Optional(
+                        CONF_STARTUP_COOLDOWN,
+                        default=entry.data.get(
+                            CONF_STARTUP_COOLDOWN,
+                            DEFAULT_STARTUP_COOLDOWN_SECONDS,
+                        ),
+                    ): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(
+                            min=timedelta(
+                                seconds=MIN_STARTUP_COOLDOWN_SECONDS
+                            ).seconds
+                        ),
                     ),
                     vol.Optional(
                         CONF_METER_TYPE,

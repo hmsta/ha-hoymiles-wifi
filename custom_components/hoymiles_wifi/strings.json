@@ -8,6 +8,7 @@
           "host": "[%key:common::config_flow::data::host%]",
           "update_interval": "Update Interval (seconds)",
           "timeout": "Timeout (seconds)",
+          "startup_cooldown": "Startup cooldown (seconds)",
           "meter_type": "Meter type"
         }
       },
@@ -18,6 +19,7 @@
           "host": "[%key:common::config_flow::data::host%]",
           "update_interval": "Update Interval (seconds)",
           "timeout": "Timeout (seconds)",
+          "startup_cooldown": "Startup cooldown (seconds)",
           "meter_type": "Meter type"
         }
       }
