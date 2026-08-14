@@ -19,6 +19,28 @@ from custom_components.hoymiles_wifi.shared_meter import (
 METER_RAW_SERIAL_NUMBER = 18417131393072
 METER_SERIAL_NUMBER = "10c012931030"
 
+GOOD_METER_ENERGY_FIELDS = {
+    "energy_total_power": 705965,
+    "energy_phase_A": 176114,
+    "energy_phase_B": 314128,
+    "energy_phase_C": 215723,
+    "energy_total_consumed": 1610765,
+    "energy_phase_A_consumed": 704306,
+    "energy_phase_B_consumed": 410489,
+    "energy_phase_C_consumed": 495970,
+}
+
+BAD_247_METER_ENERGY_FIELDS = {
+    "energy_total_power": 228800,
+    "energy_phase_A": 228500,
+    "energy_phase_B": 229700,
+    "energy_phase_C": 1410000,
+    "energy_total_consumed": 3360000,
+    "energy_phase_A_consumed": 9390000,
+    "energy_phase_B_consumed": 429136729,
+    "energy_phase_C_consumed": 2220000,
+}
+
 
 def _config_entry(entry_id: str, host: str, dtu_serial_number: str = "4121a01953c8"):
     """Build minimal config entry data for shared meter tests."""
@@ -142,6 +164,53 @@ def test_lower_energy_total_rejects_entire_meter_sample(hass):
     assert record["values"]["phase_total_power"] == -250
     assert record["last_source_dtu"] == "4121a01953c9"
     assert record["last_energy_source_dtu"] == "4121a01953c9"
+
+
+def test_inconsistent_energy_total_rejects_first_meter_sample(hass):
+    """Test internally inconsistent cumulative values cannot seed the meter."""
+    coordinator = HoymilesSharedMeterCoordinator(hass)
+    bad_entry = _config_entry("entry-bad", "192.168.10.247")
+
+    coordinator.update_from_real_data(
+        _real_data("4121A0194E49", 100, **BAD_247_METER_ENERGY_FIELDS),
+        bad_entry,
+    )
+
+    assert METER_SERIAL_NUMBER not in coordinator.data
+
+
+def test_inconsistent_energy_total_rejects_entire_meter_sample(hass):
+    """Test inconsistent cumulative values reject all values from that sample."""
+    coordinator = HoymilesSharedMeterCoordinator(hass)
+    good_entry = _config_entry("entry-good", "192.168.10.250")
+    bad_entry = _config_entry("entry-bad", "192.168.10.247")
+
+    coordinator.update_from_real_data(
+        _real_data(
+            "4121A01953C8",
+            100,
+            phase_total_power=873,
+            **GOOD_METER_ENERGY_FIELDS,
+        ),
+        good_entry,
+    )
+    coordinator.update_from_real_data(
+        _real_data(
+            "4121A0194E49",
+            101,
+            phase_total_power=867,
+            **BAD_247_METER_ENERGY_FIELDS,
+        ),
+        bad_entry,
+    )
+
+    record = _meter_record(coordinator)
+    assert record["values"]["energy_total_power"] == 705965
+    assert record["values"]["energy_total_consumed"] == 1610765
+    assert record["values"]["energy_phase_B_consumed"] == 410489
+    assert record["values"]["phase_total_power"] == 873
+    assert record["last_source_dtu"] == "4121A01953C8"
+    assert record["last_energy_source_dtu"] == "4121A01953C8"
 
 
 def test_equal_energy_total_keeps_newest_energy_source_metadata(hass):

@@ -32,7 +32,7 @@ This avoids creating duplicate meter entities for installations where several DT
 
 Meter runtime data is shared globally by meter serial number. Every DTU still polls only at its own configured update interval, but each poll response can update the shared meter store. Meter entities read from that shared store, so a DTU that reports live power but omits cumulative energy totals no longer clears the totals from another DTU.
 
-Energy counters are accepted only when the new value is greater than or equal to the last accepted value. Missing energy fields are ignored. If any present energy counter in a DTU meter sample moves backward, the whole meter sample is treated as stale and none of its values are merged. Instantaneous values such as power, voltage, current, power factor, and fault code otherwise use the newest DTU sample.
+Energy counters are accepted only when the new value is greater than or equal to the last accepted value. Missing energy fields are ignored. If any present energy counter in a DTU meter sample moves backward, the whole meter sample is treated as stale and none of its values are merged. Complete meter energy samples are also checked for internal consistency: exported energy must match the exported phase sum, and imported energy must match the consumed phase sum. Instantaneous values such as power, voltage, current, power factor, and fault code otherwise use the newest DTU sample.
 
 The meter device is shown as a standalone Hoymiles device, not as a child of one DTU. A diagnostic sensor, `Meter last source DTU`, shows which DTU last supplied an accepted shared meter update and includes source metadata in its attributes.
 

@@ -28,6 +28,20 @@ ENERGY_FIELDS = {
     "energy_phase_C_consumed",
 }
 
+ENERGY_CONSISTENCY_GROUPS = (
+    ("energy_total_power", ("energy_phase_A", "energy_phase_B", "energy_phase_C")),
+    (
+        "energy_total_consumed",
+        (
+            "energy_phase_A_consumed",
+            "energy_phase_B_consumed",
+            "energy_phase_C_consumed",
+        ),
+    ),
+)
+
+ENERGY_CONSISTENCY_TOLERANCE = 1
+
 IGNORED_METER_FIELDS = {"serial_number"}
 
 
@@ -62,6 +76,17 @@ class HoymilesSharedMeterCoordinator(DataUpdateCoordinator):
 
         for meter_data in real_data.meter_data:
             meter_serial = generate_inverter_serial_number(meter_data.serial_number)
+            existing_record = data.get(meter_serial) or {}
+            existing_values = existing_record.get("values", {})
+            present_fields = {field.name for field, _value in meter_data.ListFields()}
+
+            if self._sample_has_inconsistent_energy(
+                meter_data, meter_serial, dtu_serial, present_fields
+            ) or self._sample_has_stale_energy(
+                meter_data, meter_serial, dtu_serial, existing_values, present_fields
+            ):
+                continue
+
             record = data.setdefault(
                 meter_serial,
                 {
@@ -79,7 +104,6 @@ class HoymilesSharedMeterCoordinator(DataUpdateCoordinator):
                 },
             )
             values = record.setdefault("values", {})
-            present_fields = {field.name for field, _value in meter_data.ListFields()}
             source_is_newest = self._is_newest_source(
                 timestamp, record.get("last_source_timestamp")
             )
@@ -89,11 +113,6 @@ class HoymilesSharedMeterCoordinator(DataUpdateCoordinator):
             accepted_sample = False
             accepted_energy = False
             changed_energy = False
-
-            if self._sample_has_stale_energy(
-                meter_data, meter_serial, dtu_serial, values, present_fields
-            ):
-                continue
 
             for field in meter_data.DESCRIPTOR.fields:
                 field_name = field.name
@@ -173,6 +192,34 @@ class HoymilesSharedMeterCoordinator(DataUpdateCoordinator):
                     field_name,
                     value,
                     previous,
+                )
+                return True
+
+        return False
+
+    @staticmethod
+    def _sample_has_inconsistent_energy(
+        meter_data: Any,
+        meter_serial: str,
+        dtu_serial: str,
+        present_fields: set[str],
+    ) -> bool:
+        """Return true if complete cumulative totals do not match phase sums."""
+        for total_field, phase_fields in ENERGY_CONSISTENCY_GROUPS:
+            required_fields = {total_field, *phase_fields}
+            if not required_fields.issubset(present_fields):
+                continue
+
+            total = getattr(meter_data, total_field)
+            phase_sum = sum(getattr(meter_data, field) for field in phase_fields)
+            if abs(total - phase_sum) > ENERGY_CONSISTENCY_TOLERANCE:
+                _LOGGER.debug(
+                    "Ignoring inconsistent meter sample for meter %s from DTU %s because %s=%s does not match phase sum %s",
+                    meter_serial,
+                    dtu_serial,
+                    total_field,
+                    total,
+                    phase_sum,
                 )
                 return True
 
