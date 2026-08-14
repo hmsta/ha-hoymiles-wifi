@@ -19,6 +19,7 @@ from custom_components.hoymiles_wifi.coordinator import (
 from custom_components.hoymiles_wifi.sensor import (
     HoymilesSensorEntityDescription,
     HoymilesDataSensorEntity,
+    HoymilesEnergySensorEntity,
 )
 
 
@@ -134,3 +135,35 @@ def test_sensor_reports_unknown_before_first_real_data_refresh() -> None:
 
     assert entity.device_info["identifiers"] == {(DOMAIN, "4121a01953c8")}
     assert entity.native_value is None
+
+
+def test_daily_energy_accepts_first_value_after_startup_unknown() -> None:
+    """Test daily energy can recover from startup unknown to first real value."""
+    config_entry = SimpleNamespace(
+        entry_id="entry-a",
+        data={CONF_DTU_SERIAL_NUMBER: "4121a01953c8"},
+    )
+    coordinator = SimpleNamespace(data=None, startup_refresh_pending=True)
+    entity = HoymilesEnergySensorEntity(
+        config_entry,
+        HoymilesSensorEntityDescription(
+            key="dtu_daily_energy",
+            serial_number="4121a01953c8",
+            is_dtu_sensor=True,
+            force_keep_maximum_within_day=True,
+        ),
+        coordinator,
+    )
+
+    assert entity.native_value is None
+
+    coordinator.data = SimpleNamespace(dtu_daily_energy=1234)
+    coordinator.startup_refresh_pending = False
+    entity.update_state_value()
+
+    assert entity.native_value == 1234
+
+    coordinator.data = SimpleNamespace(dtu_daily_energy=1200)
+    entity.update_state_value()
+
+    assert entity.native_value == 1234

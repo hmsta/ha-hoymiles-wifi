@@ -1554,7 +1554,9 @@ class HoymilesDataSensorEntity(HoymilesCoordinatorEntity, RestoreSensor):
             new_native_value = f"{self._version_prefix}{new_native_value}"
 
         if (
-            self.entity_description.force_keep_maximum_within_day
+            new_native_value is not None
+            and self.entity_description.force_keep_maximum_within_day
+            and self._native_value is not None
             and self._last_update_state is not None
             and self._last_update_state.date() == datetime.now().date()
         ):
@@ -1925,7 +1927,9 @@ class HoymilesEnergyStorageSensorEntity(HoymilesCoordinatorEntity, RestoreSensor
             new_native_value = f"{self._version_prefix}{new_native_value}"
 
         if (
-            self.entity_description.force_keep_maximum_within_day
+            new_native_value is not None
+            and self.entity_description.force_keep_maximum_within_day
+            and self._native_value is not None
             and self._last_update_state is not None
             and self._last_update_state.date() == datetime.now().date()
         ):
