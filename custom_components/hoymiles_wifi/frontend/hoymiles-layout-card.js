@@ -155,9 +155,9 @@
     }
 
     .replayTime {
-      min-width: 54px;
+      min-width: 124px;
       color: rgba(255, 255, 255, .9);
-      font: 700 12px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font: 700 11px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       text-align: right;
       white-space: nowrap;
     }
@@ -360,8 +360,28 @@
     if (value === false || value === null || value === undefined || value === "") {
       return fallback;
     }
-    if (typeof value === "string" && value.includes(":")) {
-      const match = value.trim().match(/^(\d{1,2}):(\d{1,2})$/);
+    if (typeof value === "string") {
+      const trimmed = value.trim().toLowerCase();
+      const amPmMatch = trimmed.match(/^(\d{1,2})(?::(\d{1,2}))?\s*(am|pm)$/);
+      if (amPmMatch) {
+        let hours = Number(amPmMatch[1]);
+        const minutes = Number(amPmMatch[2] || 0);
+        if (
+          Number.isFinite(hours)
+          && Number.isFinite(minutes)
+          && hours >= 1
+          && hours <= 12
+          && minutes >= 0
+          && minutes < 60
+        ) {
+          if (amPmMatch[3] === "pm" && hours !== 12) hours += 12;
+          if (amPmMatch[3] === "am" && hours === 12) hours = 0;
+          return Math.min(24, Math.max(0, hours + minutes / 60));
+        }
+        return fallback;
+      }
+
+      const match = trimmed.match(/^(\d{1,2}):(\d{1,2})$/);
       if (match) {
         const hours = Number(match[1]);
         const minutes = Number(match[2]);
@@ -376,7 +396,6 @@
           return Math.min(24, Math.max(0, hours + minutes / 60));
         }
       }
-      return fallback;
     }
     const parsed = optionalNumber(value, fallback);
     return Math.min(24, Math.max(0, parsed));
@@ -974,7 +993,8 @@
       if (this._replayRange) {
         this._replayRange.addEventListener("input", (event) => {
           event.stopPropagation();
-          this._setReplaySelected(Number(event.target.value) * 1000);
+          const stepMs = Math.max(1, this._config.replayStepSeconds || DEFAULT_REPLAY_STEP_SECONDS) * 1000;
+          this._setReplaySelected(this._replay.startMs + Number(event.target.value) * stepMs);
         });
       }
 
@@ -1010,24 +1030,31 @@
         return;
       }
 
-      const min = Math.floor(this._replay.startMs / 1000);
-      const max = Math.floor(this._replay.endMs / 1000);
-      const value = Math.floor(this._replay.selectedMs / 1000);
-      this._replayRange.min = String(min);
-      this._replayRange.max = String(max);
-      this._replayRange.step = String(this._config.replayStepSeconds);
-      this._replayRange.value = String(Math.max(min, Math.min(max, value)));
+      const stepMs = Math.max(1, this._config.replayStepSeconds || DEFAULT_REPLAY_STEP_SECONDS) * 1000;
+      const maxStep = Math.max(0, Math.round((this._replay.endMs - this._replay.startMs) / stepMs));
+      const selectedStep = Math.max(
+        0,
+        Math.min(maxStep, Math.round((this._replay.selectedMs - this._replay.startMs) / stepMs)),
+      );
+      this._replayRange.min = "0";
+      this._replayRange.max = String(maxStep);
+      this._replayRange.step = "1";
+      this._replayRange.value = String(selectedStep);
       this._replayRange.disabled = this._replay.loading || Boolean(this._replay.error);
       this._replayTime.textContent = this._replay.error
         ? "Unavailable"
         : this._replay.loading
           ? "Loading"
-          : this._formatReplayTime(this._replay.selectedMs);
+          : `${this._formatReplayRange()} | ${this._formatReplayTime(this._replay.selectedMs)}`;
     }
 
     _formatReplayTime(valueMs) {
       const date = new Date(valueMs || Date.now());
-      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    }
+
+    _formatReplayRange() {
+      return `${this._formatReplayTime(this._replay.startMs)}-${this._formatReplayTime(this._replay.endMs)}`;
     }
 
     _replayRangeForNow() {
@@ -1045,15 +1072,18 @@
         if (end <= start) end.setDate(end.getDate() + 1);
       }
       const stepMs = Math.max(1, this._config.replayStepSeconds || DEFAULT_REPLAY_STEP_SECONDS) * 1000;
-      const startMs = Math.ceil(start.getTime() / stepMs) * stepMs;
-      const endMs = Math.floor(end.getTime() / stepMs) * stepMs;
-      return { startMs, endMs: Math.max(startMs, endMs) };
+      const startMs = start.getTime();
+      const stepCount = Math.max(0, Math.floor((end.getTime() - startMs) / stepMs));
+      const endMs = startMs + stepCount * stepMs;
+      return { startMs, endMs };
     }
 
     _setReplaySelected(valueMs) {
       if (!this._replay.enabled) return;
       const stepMs = Math.max(1, this._config.replayStepSeconds || DEFAULT_REPLAY_STEP_SECONDS) * 1000;
-      const snappedMs = Math.round((Number(valueMs) || this._replay.endMs) / stepMs) * stepMs;
+      const rawMs = Number(valueMs) || this._replay.endMs;
+      const stepIndex = Math.round((rawMs - this._replay.startMs) / stepMs);
+      const snappedMs = this._replay.startMs + stepIndex * stepMs;
       const selectedMs = Math.max(
         this._replay.startMs,
         Math.min(this._replay.endMs, snappedMs),
