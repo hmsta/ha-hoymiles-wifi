@@ -224,16 +224,20 @@ min_height: 520px
 replay_step_seconds: 3600
 replay_start_hour: "06:00"
 replay_end_hour: "19:00"
+signal_anchor_port: 3
+rssi_ok_dbm: -75
+rssi_bad_dbm: -90
 ```
 
 The card does not expose one selector per panel. It reads the panel positions from the pasted Hoymiles JSON and automatically matches integration entities named like:
 
 - `sensor.inverter_1421a01a4ff5_port_1_dc_power`
 - `sensor.inverter_1421a01a4ff5_port_1_dc_daily_energy`
+- `sensor.inverter_1421a01a4ff5_signal_strength`
 
 Hoymiles serial numbers from the layout JSON are lowercased before building these entity IDs.
 
-Use the `W`/`Wh` buttons on the card to switch between current DC power and daily DC energy. Values are rounded to whole digits. In `W` mode, panel fill uses `max_watts` as the 100% reference. In `Wh` mode, panel fill uses the highest visible panel daily-energy value as the 100% reference, ignoring values below `off_threshold_watts` so ghost production stays dark/off.
+Use the `RSSI`/`W`/`Wh` buttons on the card to switch between inverter signal strength, current DC power, and daily DC energy. Values are rounded to whole digits. In `RSSI` mode, panels are hidden and one signal marker is shown per inverter at `signal_anchor_port` (`3` by default). If `rssi_ok_dbm` and `rssi_bad_dbm` are both set, signal icons are green at or above `rssi_ok_dbm`, orange between the thresholds, and red at or below `rssi_bad_dbm`; missing, unavailable, or non-negative RSSI values are treated as offline/gray. Without valid thresholds the card keeps its default signal coloring. In `W` mode, panel fill uses `max_watts` as the 100% reference. In `Wh` mode, panel fill uses the highest visible panel daily-energy value as the 100% reference, ignoring values below `off_threshold_watts` so ghost production stays dark/off.
 
 The `Replay` button switches the `W` view from live values to Home Assistant history for the current day. History is loaded only when replay is opened, compressed to hourly samples by default, and cached in the browser. The default replay window is 06:00-19:00. Set `show_replay_control: false` to hide the button, adjust `replay_step_seconds` for finer/coarser jumps, or set `replay_start_hour` / `replay_end_hour` to change the daily window. Replay hours accept values like `6`, `"06:00"`, or `"6am"`.
 

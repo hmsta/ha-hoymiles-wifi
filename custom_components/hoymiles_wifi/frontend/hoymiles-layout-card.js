@@ -266,6 +266,67 @@
       --hoymiles-panel-grid: rgba(255, 255, 255, .11);
     }
 
+    .signalMarker {
+      --signal-font: 12px;
+      --signal-icon: 11px;
+      position: absolute;
+      left: 0;
+      top: 0;
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: calc(var(--signal-font) * .22);
+      min-width: max-content;
+      padding: calc(var(--signal-font) * .26) calc(var(--signal-font) * .38);
+      border: 1px solid rgba(215, 221, 230, .48);
+      border-radius: calc(var(--signal-font) * .38);
+      background: rgba(12, 20, 29, .82);
+      color: white;
+      font: 800 var(--signal-font)/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, .75);
+      transform: translate(-50%, -50%);
+      transform-origin: center center;
+      pointer-events: auto;
+      white-space: nowrap;
+    }
+
+    .signalMarker.off {
+      color: rgba(255, 255, 255, .72);
+      background: rgba(12, 20, 29, .66);
+    }
+
+    .signalIcon {
+      width: var(--signal-icon);
+      height: var(--signal-icon);
+      flex: 0 0 var(--signal-icon);
+      color: rgba(33, 151, 231, .94);
+    }
+
+    .signalMarker.weak .signalIcon {
+      color: rgba(255, 181, 71, .95);
+    }
+
+    .signalMarker.rssiOk .signalIcon {
+      color: rgba(39, 194, 107, .96);
+    }
+
+    .signalMarker.rssiWarn .signalIcon {
+      color: rgba(255, 181, 71, .95);
+    }
+
+    .signalMarker.rssiBad .signalIcon {
+      color: rgba(244, 82, 92, .97);
+    }
+
+    .signalMarker.off .signalIcon {
+      color: rgba(255, 255, 255, .52);
+    }
+
+    .signalValue {
+      display: inline-block;
+    }
+
     .panelTextStack {
       position: absolute;
       z-index: 3;
@@ -342,7 +403,9 @@
   function numericValue(value) {
     if (typeof value === "number" && Number.isFinite(value)) return value;
     if (typeof value === "string") {
-      const parsed = Number(value.replace(",", ".").replace(/[^\d.+-]/g, ""));
+      const cleaned = value.replace(",", ".").replace(/[^\d.+-]/g, "");
+      if (!/\d/.test(cleaned)) return null;
+      const parsed = Number(cleaned);
       return Number.isFinite(parsed) ? parsed : null;
     }
     return null;
@@ -756,6 +819,7 @@
       this._state = this._emptyState();
       this._entityIndex = null;
       this._panelElements = new Map();
+      this._signalElements = new Map();
       this._metricReferences = { dailyEnergyMax: 0 };
       this._metricMode = "power";
       this._replay = this._emptyReplayState();
@@ -772,6 +836,25 @@
       if (!config || config.layout == null) {
         throw new Error("Hoymiles layout card requires a layout config value.");
       }
+
+      const rssiOkDbm = optionalNumber(
+        config.rssi_ok_dbm
+          ?? config.rssiOkDbm
+          ?? config.inverter_rssi_ok_dbm
+          ?? config.inverterRssiOkDbm
+          ?? config.inverter_rssi_ok
+          ?? config.inverterRssiOk,
+        null,
+      );
+      const rssiBadDbm = optionalNumber(
+        config.rssi_bad_dbm
+          ?? config.rssiBadDbm
+          ?? config.inverter_rssi_bad_dbm
+          ?? config.inverterRssiBadDbm
+          ?? config.inverter_rssi_bad
+          ?? config.inverterRssiBad,
+        null,
+      );
 
       this._config = {
         layout: maybeJson(config.layout),
@@ -815,6 +898,16 @@
           DEFAULT_REPLAY_END_HOUR,
         ),
         replayHours: Math.max(0, optionalNumber(config.replay_hours ?? config.replayHours, 0)),
+        signalAnchorPort: Math.max(1, Math.round(optionalNumber(
+          config.signal_anchor_port
+            ?? config.signalAnchorPort
+            ?? config.inverter_near_panel
+            ?? config.inverterNearPanel,
+          3,
+        ))),
+        rssiOkDbm,
+        rssiBadDbm,
+        hasRssiThresholds: rssiOkDbm != null && rssiBadDbm != null && rssiOkDbm > rssiBadDbm,
         historyBatchSize: Math.max(1, Math.round(optionalNumber(
           config.history_batch_size ?? config.historyBatchSize,
           DEFAULT_HISTORY_BATCH_SIZE,
@@ -908,6 +1001,7 @@
               <div class="overlay"></div>
             </div>
             <div class="modeToggle" aria-label="Panel metric mode">
+              <button type="button" data-mode="signal">RSSI</button>
               <button type="button" data-mode="power">W</button>
               <button type="button" data-mode="daily_energy">Wh</button>
             </div>
@@ -1305,9 +1399,18 @@
 
     _normalizeMode(mode) {
       const value = String(mode || "power").toLowerCase();
-      return value === "daily" || value === "daily_energy" || value === "energy" || value === "wh"
-        ? "daily_energy"
-        : "power";
+      if (value === "daily" || value === "daily_energy" || value === "energy" || value === "wh") {
+        return "daily_energy";
+      }
+      if (
+        value === "signal"
+        || value === "rssi"
+        || value === "signal_strength"
+        || value === "signal-strength"
+      ) {
+        return "signal";
+      }
+      return "power";
     }
 
     _normalizeEntityMap(value) {
@@ -1326,6 +1429,7 @@
       const result = {
         power: new Map(),
         dailyEnergy: new Map(),
+        signalStrength: new Map(),
       };
       if (Array.isArray(parsed)) {
         for (const entry of parsed) {
@@ -1333,8 +1437,14 @@
           const serial = String(entry.serial ?? entry.sn ?? "").trim();
           const port = String(entry.port ?? entry.prt ?? "").trim();
           const metric = this._normalizeMode(entry.metric ?? entry.mode);
-          const target = metric === "daily_energy" ? result.dailyEnergy : result.power;
-          if (serial && port) {
+          const target = metric === "daily_energy"
+            ? result.dailyEnergy
+            : metric === "signal"
+              ? result.signalStrength
+              : result.power;
+          if (serial && metric === "signal") {
+            this._addSerialEntityKeys(target, serial, entry.entity);
+          } else if (serial && port) {
             this._addEntityKeys(target, serial, port, entry.entity);
           }
           if (entry.key) target.set(String(entry.key).toLowerCase(), entry.entity);
@@ -1343,9 +1453,20 @@
       }
 
       if (parsed && typeof parsed === "object") {
-        if (parsed.power || parsed.daily_energy || parsed.dailyEnergy) {
+        if (
+          parsed.power
+          || parsed.daily_energy
+          || parsed.dailyEnergy
+          || parsed.signal_strength
+          || parsed.signalStrength
+          || parsed.signal
+          || parsed.rssi
+        ) {
           result.power = this._normalizeEntityMap(parsed.power);
           result.dailyEnergy = this._normalizeEntityMap(parsed.daily_energy ?? parsed.dailyEnergy);
+          result.signalStrength = this._normalizeEntityMap(
+            parsed.signal_strength ?? parsed.signalStrength ?? parsed.signal ?? parsed.rssi,
+          );
         } else {
           for (const [key, entityId] of Object.entries(parsed)) {
             if (typeof entityId === "string") result.power.set(String(key).toLowerCase(), entityId);
@@ -1635,6 +1756,13 @@
       };
     }
 
+    _signalFontSize(panel) {
+      const cell = this._hoymilesCellSize(panel.areaPlace || {});
+      const displaySize = this._panelDisplaySize(cell);
+      const shortSide = Math.max(1, Math.min(displaySize.width, displaySize.height));
+      return Math.max(10, Math.min(30, shortSide * 0.32));
+    }
+
     _addEntityKeys(target, serial, port, entityId) {
       const normalized = normalizeSerial(serial);
       const suffix = String(serial || "").slice(-4).toLowerCase();
@@ -1644,12 +1772,23 @@
       target.set(`${suffix}:${portText}`, entityId);
     }
 
+    _addSerialEntityKeys(target, serial, entityId) {
+      const normalized = normalizeSerial(serial);
+      const suffix = String(serial || "").slice(-4).toLowerCase();
+      if (normalized) target.set(normalized, entityId);
+      if (suffix) target.set(suffix, entityId);
+    }
+
     _entityMapForMetric(metric) {
-      return metric === "daily_energy" ? this._config.entities.dailyEnergy : this._config.entities.power;
+      if (metric === "daily_energy") return this._config.entities.dailyEnergy;
+      if (metric === "signal") return this._config.entities.signalStrength;
+      return this._config.entities.power;
     }
 
     _indexMapForMetric(index, metric) {
-      return metric === "daily_energy" ? index.dailyEnergy : index.power;
+      if (metric === "daily_energy") return index.dailyEnergy;
+      if (metric === "signal") return index.signalStrength;
+      return index.power;
     }
 
     _directEntityIds(panel, metric) {
@@ -1659,6 +1798,34 @@
       return metric === "daily_energy"
         ? [`sensor.inverter_${serial}_port_${port}_dc_daily_energy`]
         : [`sensor.inverter_${serial}_port_${port}_dc_power`];
+    }
+
+    _directSignalEntityIds(serial) {
+      const normalized = normalizeSerial(serial);
+      return normalized ? [`sensor.inverter_${normalized}_signal_strength`] : [];
+    }
+
+    _signalEntityForSerial(serial) {
+      const explicitMap = this._entityMapForMetric("signal");
+      const normalized = normalizeSerial(serial);
+      const suffix = String(serial || "").slice(-4).toLowerCase();
+      for (const key of [normalized, suffix]) {
+        const explicit = explicitMap.get(key);
+        if (explicit) return explicit;
+      }
+
+      const states = this._hass && this._hass.states ? this._hass.states : {};
+      for (const entityId of this._directSignalEntityIds(serial)) {
+        if (states[entityId]) return entityId;
+      }
+
+      const index = this._buildEntityIndex();
+      const signalIndex = this._indexMapForMetric(index, "signal");
+      for (const key of [normalized, suffix]) {
+        const entityId = signalIndex.get(key);
+        if (entityId) return entityId;
+      }
+      return null;
     }
 
     _entityForPanel(panel, metric = "power") {
@@ -1688,6 +1855,7 @@
       const index = {
         power: new Map(),
         dailyEnergy: new Map(),
+        signalStrength: new Map(),
       };
       const states = this._hass && this._hass.states ? this._hass.states : {};
       for (const [entityId, stateObj] of Object.entries(states)) {
@@ -1696,10 +1864,16 @@
         const metric = this._metricFromEntity(entityId, attrs);
         if (!metric) continue;
 
-        const port = this._portFromEntity(entityId, attrs);
         const serial = this._serialFromEntity(entityId, stateObj, attrs);
-        if (!serial || !port) continue;
+        if (!serial) continue;
 
+        if (metric === "signal") {
+          this._addSerialEntityKeys(this._indexMapForMetric(index, metric), serial, entityId);
+          continue;
+        }
+
+        const port = this._portFromEntity(entityId, attrs);
+        if (!port) continue;
         this._addEntityKeys(this._indexMapForMetric(index, metric), serial, port, entityId);
       }
 
@@ -1710,6 +1884,16 @@
     _metricFromEntity(entityId, attrs) {
       const name = `${entityId} ${attrs.friendly_name || ""}`.toLowerCase();
       const unit = String(attrs.unit_of_measurement || "").toLowerCase();
+      if (
+        name.includes("signal_strength")
+        || name.includes("signal strength")
+        || name.includes("rssi")
+        || attrs.device_class === "signal_strength"
+        || unit === "dbm"
+      ) {
+        return "signal";
+      }
+
       const isPort = attrs.port_number != null || name.includes("port");
       const isDc = name.includes("dc") || attrs.inverter_serial_number;
       if (!isPort || !isDc) return null;
@@ -1824,6 +2008,23 @@
       };
     }
 
+    _signalMetric(serial) {
+      const entityId = this._signalEntityForSerial(serial);
+      if (!entityId || !this._hass || !this._hass.states || !this._hass.states[entityId]) {
+        return { value: null, synthetic: false, entityId, unit: "dBm" };
+      }
+
+      const stateObj = this._hass.states[entityId];
+      return {
+        value: numericValue(stateObj.state),
+        synthetic: false,
+        entityId,
+        unit: stateObj.attributes && stateObj.attributes.unit_of_measurement
+          ? stateObj.attributes.unit_of_measurement
+          : "dBm",
+      };
+    }
+
     _panelMetrics(panel) {
       const power = this._replay.enabled && this._metricMode === "power"
         ? this._replayPowerMetric(panel)
@@ -1839,6 +2040,16 @@
       if (!metric || metric.value == null || !Number.isFinite(Number(metric.value))) return "";
       const unit = metric.unit || "W";
       return `${Math.round(Number(metric.value))} ${unit}`;
+    }
+
+    _formatSignalMetric(metric) {
+      if (!metric || this._isMissingSignalValue(metric.value)) return "-- dBm";
+      return `${Math.round(Number(metric.value))} ${metric.unit || "dBm"}`;
+    }
+
+    _isMissingSignalValue(value) {
+      if (value == null || !Number.isFinite(Number(value))) return true;
+      return Number(value) >= 0;
     }
 
     _fillValue(metric, mode) {
@@ -2017,6 +2228,125 @@
       overlay.appendChild(item);
     }
 
+    _signalAnchorPanels() {
+      const bySerial = new Map();
+      for (const panel of this._state.points) {
+        const serial = normalizeSerial(panel.sn);
+        if (!serial) continue;
+        if (!bySerial.has(serial)) bySerial.set(serial, []);
+        bySerial.get(serial).push(panel);
+      }
+
+      const anchors = [];
+      const targetPort = String(this._config.signalAnchorPort || 3);
+      for (const [serial, panels] of bySerial.entries()) {
+        const sorted = panels.slice().sort((a, b) => Number(a.prt || 0) - Number(b.prt || 0));
+        const panel = sorted.find((item) => String(item.prt) === targetPort) || sorted[0];
+        if (panel) anchors.push({ serial, panel });
+      }
+      return anchors;
+    }
+
+    _createSignalIcon() {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "signalIcon");
+      svg.setAttribute("viewBox", "0 0 24 24");
+      svg.setAttribute("aria-hidden", "true");
+      svg.setAttribute("focusable", "false");
+
+      const paths = [
+        "M5 12.5a10 10 0 0 1 14 0",
+        "M8.5 16a5 5 0 0 1 7 0",
+      ];
+      for (const d of paths) {
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", d);
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", "currentColor");
+        path.setAttribute("stroke-width", "2.3");
+        path.setAttribute("stroke-linecap", "round");
+        svg.appendChild(path);
+      }
+
+      const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      dot.setAttribute("cx", "12");
+      dot.setAttribute("cy", "19");
+      dot.setAttribute("r", "1.7");
+      dot.setAttribute("fill", "currentColor");
+      svg.appendChild(dot);
+      return svg;
+    }
+
+    _configureSignalMarker(marker, anchor) {
+      const panel = anchor.panel;
+      const metric = this._signalMetric(anchor.serial);
+      const value = metric.value == null ? null : Number(metric.value);
+      const isOff = this._isMissingSignalValue(value);
+      const isWeak = !this._config.hasRssiThresholds && !isOff && value <= -80;
+      const isOk = this._config.hasRssiThresholds && !isOff && value >= this._config.rssiOkDbm;
+      const isBad = this._config.hasRssiThresholds && !isOff && value <= this._config.rssiBadDbm;
+      const isWarn = this._config.hasRssiThresholds && !isOff && !isOk && !isBad;
+      marker.classList.toggle("off", isOff);
+      marker.classList.toggle("weak", isWeak);
+      marker.classList.toggle("rssiOk", isOk);
+      marker.classList.toggle("rssiWarn", isWarn);
+      marker.classList.toggle("rssiBad", isBad);
+      marker.title = [
+        panel.area,
+        `SN ${String(panel.sn || "").toUpperCase()}`,
+        `Anchor port ${panel.prt}`,
+        metric.entityId || "No signal entity",
+        this._formatSignalMetric(metric),
+      ].filter(Boolean).join("\n");
+
+      const text = marker.querySelector(".signalValue");
+      if (text) text.textContent = this._formatSignalMetric(metric);
+
+      if (metric.entityId) {
+        marker.dataset.entityId = metric.entityId;
+        marker.onclick = (event) => {
+          event.stopPropagation();
+          fireEvent(this, "hass-more-info", { entityId: metric.entityId });
+        };
+      } else {
+        delete marker.dataset.entityId;
+        marker.onclick = null;
+      }
+    }
+
+    _renderSignalMarker(anchor, overlay) {
+      const panel = anchor.panel;
+      const snap = this._state.areaRowSnaps.get(panel.key);
+      const pos = this._projectPtd({
+        x: snap ? snap.x : ptdValue(panel, "x"),
+        z: snap ? snap.z : ptdValue(panel, "z"),
+      });
+      const stagePos = this._stagePercentFor(pos);
+      const font = this._signalFontSize(panel);
+
+      const marker = document.createElement("div");
+      marker.className = "signalMarker";
+      marker.style.left = `${stagePos.left}%`;
+      marker.style.top = `${stagePos.top}%`;
+      marker.style.setProperty("--signal-font", `${font.toFixed(2)}px`);
+      marker.style.setProperty("--signal-icon", `${(font * 0.94).toFixed(2)}px`);
+
+      marker.appendChild(this._createSignalIcon());
+      const text = document.createElement("span");
+      text.className = "signalValue";
+      marker.appendChild(text);
+      this._configureSignalMarker(marker, anchor);
+
+      this._signalElements.set(anchor.serial, { item: marker, anchor });
+      overlay.appendChild(marker);
+    }
+
+    _renderSignalMarkers(overlay) {
+      for (const anchor of this._signalAnchorPanels()) {
+        this._renderSignalMarker(anchor, overlay);
+      }
+    }
+
     _render() {
       if (!this._overlay || !this._state.layout) return;
       this._refreshMetricReferences();
@@ -2024,6 +2354,12 @@
       this._applyCamera();
       this._overlay.innerHTML = "";
       this._panelElements = new Map();
+      this._signalElements = new Map();
+
+      if (this._metricMode === "signal") {
+        this._renderSignalMarkers(this._overlay);
+        return;
+      }
 
       const rendered = new Set();
       for (const row of this._state.areaRowModels) {
@@ -2036,6 +2372,14 @@
     }
 
     _updatePanelValues() {
+      if (this._metricMode === "signal") {
+        if (!this._signalElements || this._signalElements.size === 0) return false;
+        for (const { item, anchor } of this._signalElements.values()) {
+          this._configureSignalMarker(item, anchor);
+        }
+        return true;
+      }
+
       if (!this._panelElements || this._panelElements.size === 0) return false;
       this._refreshMetricReferences();
       for (const { item, panel, layout } of this._panelElements.values()) {
