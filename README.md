@@ -239,9 +239,10 @@ The `Replay` button switches the `W` view from live values to Home Assistant his
 
 ## Screenshots
 
-![Integration](/screenshots/integration.png?raw=true)
-![Devices](/screenshots/devices.png?raw=true)
-![Device](/screenshots/device.png?raw=true)
+![Hoymiles layout map](screenshots/layout-map.png)
+![Integration](screenshots/integration.png)
+![Devices](screenshots/devices.png)
+![Device](screenshots/device.png)
 
 ## Caution
 
