@@ -1,7 +1,9 @@
 """Platform for retrieving values of a Hoymiles inverter."""
 
 from datetime import timedelta
+import inspect
 import logging
+from pathlib import Path
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
@@ -52,6 +54,9 @@ from .util import async_get_config_entry_data_for_host
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SENSOR, Platform.NUMBER, Platform.BINARY_SENSOR, Platform.BUTTON]
+FRONTEND_DIR = Path(__file__).parent / "frontend"
+FRONTEND_URL = f"/{DOMAIN}_static"
+FRONTEND_CARD_FILENAME = "hoymiles-layout-card.js"
 
 SET_BMS_SCHEMA = vol.Schema(
     {
@@ -80,11 +85,48 @@ SET_BMS_SCHEMA = vol.Schema(
 
 async def async_setup(hass: HomeAssistant, config: ConfigType):
     """Set up this integration using YAML is not supported."""
+    await _async_register_frontend(hass)
     return True
+
+
+async def _async_register_frontend(hass: HomeAssistant) -> None:
+    """Register bundled frontend assets for the Hoymiles layout card."""
+    hass.data.setdefault(DOMAIN, {})
+    if hass.data[DOMAIN].get("frontend_registered"):
+        return
+
+    try:
+        from homeassistant.components.http import (  # pylint: disable=import-outside-toplevel
+            StaticPathConfig,
+            async_register_static_paths,
+        )
+    except ImportError:
+        result = hass.http.register_static_path(
+            FRONTEND_URL,
+            str(FRONTEND_DIR),
+            False,
+        )
+        if inspect.isawaitable(result):
+            await result
+    else:
+        await async_register_static_paths(
+            hass,
+            [
+                StaticPathConfig(
+                    FRONTEND_URL,
+                    str(FRONTEND_DIR),
+                    False,
+                )
+            ],
+        )
+
+    hass.data[DOMAIN]["frontend_registered"] = True
 
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     """Set up this integration using UI."""
+
+    await _async_register_frontend(hass)
 
     hass.data.setdefault(DOMAIN, {})
     shared_meter_coordinator = hass.data[DOMAIN].get(HASS_SHARED_METER_COORDINATOR)

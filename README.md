@@ -195,6 +195,48 @@ Configuration is done in the UI.
 > [!NOTE]
 > Setting the update interval below approximately 32 seconds (120 seconds for newer firmware versions) may disable Hoymiles cloud functionality. To ensure proper communication with Hoymiles servers, keep the update interval at or above this threshold.
 
+## Hoymiles Layout Card
+
+This fork includes an experimental Lovelace custom card for rendering the Hoymiles cloud layout JSON on top of the cloud background image.
+
+Add the dashboard resource after installing or updating the integration:
+
+```yaml
+url: /hoymiles_wifi_static/hoymiles-layout-card.js
+type: module
+```
+
+Then add a manual Lovelace card and paste the Hoymiles `v3_g_c` response as `layout`:
+
+```yaml
+type: custom:hoymiles-layout-card
+layout:
+  status: "0"
+  message: success
+  data:
+    k_101:
+      # paste Hoymiles image metadata here
+    k_100:
+      # paste Hoymiles array data here
+max_watts: 300
+off_threshold_watts: 1
+min_height: 520px
+replay_step_seconds: 3600
+replay_start_hour: "06:00"
+replay_end_hour: "19:00"
+```
+
+The card does not expose one selector per panel. It reads the panel positions from the pasted Hoymiles JSON and automatically matches integration entities named like:
+
+- `sensor.inverter_1421a01a4ff5_port_1_dc_power`
+- `sensor.inverter_1421a01a4ff5_port_1_dc_daily_energy`
+
+Hoymiles serial numbers from the layout JSON are lowercased before building these entity IDs.
+
+Use the `W`/`Wh` buttons on the card to switch between current DC power and daily DC energy. Values are rounded to whole digits. In `W` mode, panel fill uses `max_watts` as the 100% reference. In `Wh` mode, panel fill uses the highest visible panel daily-energy value as the 100% reference, ignoring values below `off_threshold_watts` so ghost production stays dark/off.
+
+The `Replay` button switches the `W` view from live values to Home Assistant history for the current day. History is loaded only when replay is opened, compressed to hourly samples by default, and cached in the browser. The default replay window is 06:00-19:00. Set `show_replay_control: false` to hide the button, adjust `replay_step_seconds` for finer/coarser jumps, or set `replay_start_hour` / `replay_end_hour` to change the daily window.
+
 ## Screenshots
 
 ![Integration](/screenshots/integration.png?raw=true)
