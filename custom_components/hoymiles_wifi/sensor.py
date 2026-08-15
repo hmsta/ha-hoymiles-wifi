@@ -29,7 +29,11 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 import hoymiles_wifi.hoymiles
-from hoymiles_wifi.hoymiles import DTUType, get_dtu_model_type
+from hoymiles_wifi.hoymiles import (
+    DTUType,
+    generate_inverter_serial_number,
+    get_dtu_model_type,
+)
 
 from .const import (
     CONF_DTU_SERIAL_NUMBER,
@@ -55,6 +59,8 @@ from .entity import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+_MISSING = object()
 
 
 class ConversionAction(Enum):
@@ -1491,6 +1497,56 @@ class HoymilesDataSensorEntity(HoymilesCoordinatorEntity, RestoreSensor):
         """Return the assumed state of the sensor."""
         return self._assumed_state
 
+    @property
+    def extra_state_attributes(self):
+        """Return metadata useful for Lovelace panel layout cards."""
+        if self.entity_description.port_number is None:
+            return None
+
+        return {
+            "inverter_serial_number": str(self.entity_description.serial_number).upper(),
+            "port_number": self.entity_description.port_number,
+        }
+
+    @staticmethod
+    def _serial_matches(raw_serial_number, expected_serial_number: str) -> bool:
+        """Return if a raw decimal serial matches the configured hex serial."""
+        if raw_serial_number is None or expected_serial_number is None:
+            return False
+
+        expected_serial_number = str(expected_serial_number).lower()
+        candidates = {str(raw_serial_number).lower()}
+
+        for candidate in (raw_serial_number, str(raw_serial_number)):
+            try:
+                candidates.add(generate_inverter_serial_number(candidate).lower())
+            except (TypeError, ValueError):
+                pass
+
+        return expected_serial_number in candidates
+
+    def _serial_matched_list_item(self, attribute_name: str, attribute: list):
+        """Return the raw data item that belongs to this entity's device serial."""
+        if attribute_name not in ("sgs_data", "tgs_data", "pv_data"):
+            return _MISSING
+
+        serial_number = self.entity_description.serial_number
+        if serial_number is None:
+            return _MISSING
+
+        for item in attribute:
+            if not self._serial_matches(getattr(item, "serial_number", None), serial_number):
+                continue
+
+            if attribute_name == "pv_data" and getattr(
+                item, "port_number", None
+            ) != self.entity_description.port_number:
+                continue
+
+            return item
+
+        return None
+
     def update_state_value(self):
         """Update the state value of the sensor based on the coordinator data."""
         new_native_value = 0.0
@@ -1513,9 +1569,20 @@ class HoymilesDataSensorEntity(HoymilesCoordinatorEntity, RestoreSensor):
                 else None
             )
 
-            attribute = getattr(self.coordinator.data, attribute_name.split("[")[0], [])
+            attribute_name = attribute_name.split("[")[0]
+            attribute = getattr(self.coordinator.data, attribute_name, [])
+            serial_matched_item = self._serial_matched_list_item(
+                attribute_name, attribute
+            )
 
-            if index < len(attribute):
+            if serial_matched_item is not _MISSING:
+                if serial_matched_item is None:
+                    new_native_value = None
+                elif nested_attribute is not None:
+                    new_native_value = getattr(serial_matched_item, nested_attribute, None)
+                else:
+                    new_native_value = serial_matched_item
+            elif index < len(attribute):
                 if nested_attribute is not None:
                     new_native_value = getattr(attribute[index], nested_attribute, None)
                 else:

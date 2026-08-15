@@ -167,3 +167,103 @@ def test_daily_energy_accepts_first_value_after_startup_unknown() -> None:
     entity.update_state_value()
 
     assert entity.native_value == 1234
+
+
+def test_inverter_sensor_reads_real_data_by_serial_not_stored_index() -> None:
+    """Test real-data inverter sensors do not trust discovery order."""
+    config_entry = SimpleNamespace(
+        entry_id="entry-a",
+        data={CONF_DTU_SERIAL_NUMBER: "4121a01953c8"},
+    )
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            sgs_data=[
+                SimpleNamespace(serial_number=22134652552530, voltage=5),
+                SimpleNamespace(serial_number=22134652556250, voltage=2305),
+            ]
+        ),
+        startup_refresh_pending=False,
+    )
+    entity = HoymilesDataSensorEntity(
+        config_entry,
+        HoymilesSensorEntityDescription(
+            key="sgs_data[0].voltage",
+            serial_number="1421a01a53da",
+            conversion_factor=0.1,
+        ),
+        coordinator,
+    )
+
+    assert entity.native_value == 230.5
+
+
+def test_pv_sensor_reads_real_data_by_serial_and_port_not_stored_index() -> None:
+    """Test PV sensors are mapped by inverter serial and port."""
+    config_entry = SimpleNamespace(
+        entry_id="entry-a",
+        data={CONF_DTU_SERIAL_NUMBER: "4121a01953c8"},
+    )
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            pv_data=[
+                SimpleNamespace(
+                    serial_number=22134652552530,
+                    port_number=2,
+                    energy_daily=None,
+                ),
+                SimpleNamespace(
+                    serial_number=22134652556250,
+                    port_number=1,
+                    energy_daily=1530,
+                ),
+                SimpleNamespace(
+                    serial_number=22134652556250,
+                    port_number=2,
+                    energy_daily=1681,
+                ),
+            ]
+        ),
+        startup_refresh_pending=False,
+    )
+    entity = HoymilesEnergySensorEntity(
+        config_entry,
+        HoymilesSensorEntityDescription(
+            key="pv_data[0].energy_daily",
+            serial_number="1421a01a53da",
+            port_number=2,
+        ),
+        coordinator,
+    )
+
+    assert entity.native_value == 1681
+
+
+def test_pv_sensor_without_matching_serial_and_port_is_unknown() -> None:
+    """Test a missing PV serial/port does not fall back to another inverter."""
+    config_entry = SimpleNamespace(
+        entry_id="entry-a",
+        data={CONF_DTU_SERIAL_NUMBER: "4121a01953c8"},
+    )
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            pv_data=[
+                SimpleNamespace(
+                    serial_number=22134652552530,
+                    port_number=4,
+                    energy_daily=999,
+                )
+            ]
+        ),
+        startup_refresh_pending=False,
+    )
+    entity = HoymilesEnergySensorEntity(
+        config_entry,
+        HoymilesSensorEntityDescription(
+            key="pv_data[0].energy_daily",
+            serial_number="1421a01a53da",
+            port_number=4,
+        ),
+        coordinator,
+    )
+
+    assert entity.native_value is None
