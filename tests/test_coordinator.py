@@ -197,6 +197,35 @@ def test_inverter_sensor_reads_real_data_by_serial_not_stored_index() -> None:
     assert entity.native_value == 230.5
 
 
+def test_inverter_signal_strength_is_exposed_as_numeric_sensor() -> None:
+    """Test inverter RF signal strength reads from the real-data payload."""
+    config_entry = SimpleNamespace(
+        entry_id="entry-a",
+        data={CONF_DTU_SERIAL_NUMBER: "4121a01953c8"},
+    )
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            sgs_data=[
+                SimpleNamespace(
+                    serial_number=22134652556250,
+                    modulation_index_signal=-86,
+                ),
+            ]
+        ),
+        startup_refresh_pending=False,
+    )
+    entity = HoymilesDataSensorEntity(
+        config_entry,
+        HoymilesSensorEntityDescription(
+            key="sgs_data[0].modulation_index_signal",
+            serial_number="1421a01a53da",
+        ),
+        coordinator,
+    )
+
+    assert entity.native_value == -86
+
+
 def test_pv_sensor_reads_real_data_by_serial_and_port_not_stored_index() -> None:
     """Test PV sensors are mapped by inverter serial and port."""
     config_entry = SimpleNamespace(

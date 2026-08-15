@@ -18,6 +18,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
     EntityCategory,
+    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
@@ -211,6 +212,14 @@ HOYMILES_SENSORS = [
         conversion_factor=0.1,
     ),
     HoymilesSensorEntityDescription(
+        key="sgs_data[<inverter_count>].modulation_index_signal",
+        translation_key="signal_strength",
+        native_unit_of_measurement=SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    HoymilesSensorEntityDescription(
         key="sgs_data[<inverter_count>].warning_number",
         translation_key="inverter_warning_number",
         entity_registry_enabled_default=False,
@@ -326,6 +335,14 @@ HOYMILES_SENSORS = [
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
         conversion_factor=0.1,
+    ),
+    HoymilesSensorEntityDescription(
+        key="tgs_data[<inverter_count>].modulation_index_signal",
+        translation_key="signal_strength",
+        native_unit_of_measurement=SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     HoymilesSensorEntityDescription(
         key="tgs_data[<inverter_count>].warning_number",
