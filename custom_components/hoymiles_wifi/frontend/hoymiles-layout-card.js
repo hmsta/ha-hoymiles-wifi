@@ -155,7 +155,7 @@
     }
 
     .replayTime {
-      min-width: 124px;
+      min-width: 42px;
       color: rgba(255, 255, 255, .9);
       font: 700 11px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       text-align: right;
@@ -876,7 +876,7 @@
         cropY: optionalNumber(config.crop_y ?? config.cropY, DEFAULT_CROP_Y),
         initialZoom: optionalNumber(config.initial_zoom ?? config.initialZoom, 1),
         maxZoom: optionalNumber(config.max_zoom ?? config.maxZoom, DEFAULT_MAX_ZOOM),
-        height: cssLength(config.height),
+        height: cssLength(config.height ?? config.map_height ?? config.mapHeight ?? config.card_height ?? config.cardHeight),
         minHeight: cssLength(config.min_height ?? config.minHeight, "420px"),
         backgroundUrl: config.background_url ?? config.backgroundUrl ?? "",
         showSerial: config.show_serial !== false && config.showSerial !== false,
@@ -1139,16 +1139,12 @@
         ? "Unavailable"
         : this._replay.loading
           ? "Loading"
-          : `${this._formatReplayRange()} | ${this._formatReplayTime(this._replay.selectedMs)}`;
+          : this._formatReplayTime(this._replay.selectedMs);
     }
 
     _formatReplayTime(valueMs) {
       const date = new Date(valueMs || Date.now());
       return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-    }
-
-    _formatReplayRange() {
-      return `${this._formatReplayTime(this._replay.startMs)}-${this._formatReplayTime(this._replay.endMs)}`;
     }
 
     _replayRangeForNow() {
