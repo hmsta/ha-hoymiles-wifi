@@ -96,19 +96,28 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
         return
 
     try:
-        from homeassistant.components.http import (  # pylint: disable=import-outside-toplevel
-            StaticPathConfig,
-            async_register_static_paths,
-        )
+        from homeassistant.components.http import StaticPathConfig  # pylint: disable=import-outside-toplevel
     except ImportError:
-        result = hass.http.register_static_path(
-            FRONTEND_URL,
-            str(FRONTEND_DIR),
-            False,
+        StaticPathConfig = None
+
+    try:
+        from homeassistant.components.http import async_register_static_paths  # pylint: disable=import-outside-toplevel
+    except ImportError:
+        async_register_static_paths = None
+
+    if StaticPathConfig is not None and hasattr(hass.http, "async_register_static_paths"):
+        result = hass.http.async_register_static_paths(
+            [
+                StaticPathConfig(
+                    FRONTEND_URL,
+                    str(FRONTEND_DIR),
+                    False,
+                )
+            ],
         )
         if inspect.isawaitable(result):
             await result
-    else:
+    elif StaticPathConfig is not None and async_register_static_paths is not None:
         await async_register_static_paths(
             hass,
             [
@@ -119,6 +128,16 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
                 )
             ],
         )
+    elif hasattr(hass.http, "register_static_path"):
+        result = hass.http.register_static_path(
+            FRONTEND_URL,
+            str(FRONTEND_DIR),
+            False,
+        )
+        if inspect.isawaitable(result):
+            await result
+    else:
+        raise RuntimeError("Home Assistant static path registration API is unavailable")
 
     hass.data[DOMAIN]["frontend_registered"] = True
 
