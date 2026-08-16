@@ -878,12 +878,12 @@
         cropY: optionalNumber(config.crop_y ?? config.cropY, DEFAULT_CROP_Y),
         initialZoom: optionalNumber(config.initial_zoom ?? config.initialZoom, 1),
         maxZoom: optionalNumber(config.max_zoom ?? config.maxZoom, DEFAULT_MAX_ZOOM),
-        panelTextMinZoom: Math.max(1, optionalNumber(
-          config.panel_text_min_zoom
-            ?? config.panelTextMinZoom
-            ?? config.text_min_zoom
-            ?? config.textMinZoom,
-          1,
+        panelTextMinSize: Math.max(0, optionalNumber(
+          config.panel_text_min_size
+            ?? config.panelTextMinSize
+            ?? config.text_min_size
+            ?? config.textMinSize,
+          30,
         )),
         height: cssLength(config.height ?? config.map_height ?? config.mapHeight ?? config.card_height ?? config.cardHeight),
         minHeight: cssLength(config.min_height ?? config.minHeight, "420px"),
@@ -2077,14 +2077,14 @@
     }
 
     _appendPanelText(item, panel, metric, layout, displaySize) {
-      if ((this._state.viewScale || 1) < this._config.panelTextMinZoom) return;
-
       const screenShortSide = Math.min(displaySize.width, displaySize.height);
       const screenLongSide = Math.max(displaySize.width, displaySize.height);
-      if (screenShortSide < 30 || screenLongSide < 46) return;
+      const minShortSide = Math.max(0, this._config.panelTextMinSize || 0);
+      const minLongSide = minShortSide * 46 / 30;
+      if (screenShortSide < minShortSide || screenLongSide < minLongSide) return;
 
       const hasMetric = metric.value != null;
-      const hasId = this._config.showSerial && screenShortSide >= 30 && screenLongSide >= 46;
+      const hasId = this._config.showSerial;
       if (!hasMetric && !hasId) return;
 
       const metricText = hasMetric ? this._formatMetric(metric) : "";
