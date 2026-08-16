@@ -100,8 +100,18 @@ def _infer_serial_from_entity(
 
 def _stable_key(key: str) -> str:
     """Return the index-free key fragment used by stable unique IDs."""
-    key = re.sub(r"\[\d+\]", "", key)
+    key = re.sub(r"\[[^\]]+\]", "", key)
     return key.lstrip(".")
+
+
+def _strip_known_serial_prefix(stable_key: str, known_serials: set[str]) -> str:
+    """Remove a serial prefix left by an earlier migration attempt."""
+    normalized_key = stable_key.lower()
+    for serial_number in sorted(known_serials, key=len, reverse=True):
+        prefix = f"{serial_number}_"
+        if normalized_key.startswith(prefix):
+            return stable_key[len(prefix) :]
+    return stable_key
 
 
 def _target_key(description) -> tuple[str, str, int | None, str | None]:
@@ -601,7 +611,7 @@ async def async_migrate_entity_unique_ids(
         if legacy_key is None:
             continue
 
-        stable_key = _stable_key(legacy_key)
+        stable_key = _strip_known_serial_prefix(_stable_key(legacy_key), known_serials)
         inferred_serial = _infer_serial_from_entity(hass, entity_entry, known_serials)
         target_key = None
         if inferred_serial is not None:

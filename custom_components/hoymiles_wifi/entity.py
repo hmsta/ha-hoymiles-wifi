@@ -116,7 +116,7 @@ def get_hoymiles_entity_unique_id(entry_id: str, description: EntityDescription)
     if serial_number is None or "[" not in key:
         return f"hoymiles_{entry_id}_{key}"
 
-    stable_key = re.sub(r"\[\d+\]", "", key).lstrip(".")
+    stable_key = re.sub(r"\[[^\]]+\]", "", key).lstrip(".")
     unique_id_parts = [
         "hoymiles",
         entry_id,
@@ -200,7 +200,7 @@ def _entity_object_id_suffix(description: EntityDescription) -> str:
 
 def _stable_object_key(key: str) -> str:
     """Return a fallback object suffix from an entity description key."""
-    key = re.sub(r"\[\d+\]", "", key)
+    key = re.sub(r"\[[^\]]+\]", "", key)
     key = re.sub(r"<[^>]+>", "", key)
     return key.strip("._")
 
