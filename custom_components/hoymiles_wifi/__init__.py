@@ -46,10 +46,9 @@ from .coordinator import (
     HoymilesRealDataUpdateCoordinator,
     HoymilesEnergyStorageUpdateCoordinator,
 )
-from .error import CannotConnect
+from .entity_migration import async_migrate_entity_unique_ids
 from .services import async_handle_set_bms_mode
 from .shared_meter import HoymilesSharedMeterCoordinator
-from .util import async_get_config_entry_data_for_host
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -289,9 +288,7 @@ async def async_remove_config_entry_device(
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Migrate old entry data to the new entry schema."""
 
-    data = config_entry.data.copy()
-
-    current_version = data.get("version", 1)
+    current_version = config_entry.version
 
     if current_version != CONFIG_VERSION:
         _LOGGER.info(
@@ -299,33 +296,16 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         )
         new = {**config_entry.data}
 
-        host = config_entry.data.get(CONF_HOST)
-        try:
-            (
-                dtu_sn,
-                single_phase_inverters,
-                three_phase_inverters,
-                ports,
-                meters,
-                hybrid_inverters,
-                is_encrypted,
-                enc_rand,
-            ) = await async_get_config_entry_data_for_host(host)
-        except CannotConnect:
-            _LOGGER.error(
-                "Could not retrieve real data information data from inverter: %s. Please ensure inverter is available!",
-                host,
-            )
-            return False
+        new.setdefault(CONF_THREE_PHASE_INVERTERS, [])
+        new.setdefault(CONF_HYBRID_INVERTERS, [])
+        new.setdefault(CONF_METERS, [])
+        new.setdefault(CONF_PORTS, [])
+        new.setdefault(CONF_STARTUP_COOLDOWN, DEFAULT_STARTUP_COOLDOWN_SECONDS)
+        new.setdefault(CONF_TIMEOUT, DEFAULT_TIMEOUT_SECONDS)
+        new.setdefault(CONF_IS_ENCRYPTED, False)
+        new.setdefault(CONF_ENC_RAND, None)
 
-        new[CONF_DTU_SERIAL_NUMBER] = dtu_sn
-        new[CONF_INVERTERS] = single_phase_inverters
-        new[CONF_THREE_PHASE_INVERTERS] = three_phase_inverters
-        new[CONF_PORTS] = ports
-        new[CONF_METERS] = meters
-        new[CONF_HYBRID_INVERTERS] = hybrid_inverters
-        new[CONF_IS_ENCRYPTED] = is_encrypted
-        new[CONF_ENC_RAND] = enc_rand
+        await async_migrate_entity_unique_ids(hass, config_entry.entry_id, new)
 
         hass.config_entries.async_update_entry(
             config_entry, data=new, version=CONFIG_VERSION

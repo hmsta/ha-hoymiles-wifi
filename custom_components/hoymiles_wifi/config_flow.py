@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
+    CONF_DELETE_MISSING_INVERTERS,
     CONF_DTU_SERIAL_NUMBER,
     CONF_HYBRID_INVERTERS,
     CONF_INVERTERS,
@@ -36,6 +37,7 @@ from .const import (
     MIN_STARTUP_COOLDOWN_SECONDS,
     MIN_TIMEOUT_SECONDS,
 )
+from .entity_migration import async_migrate_entity_unique_ids
 from .error import CannotConnect
 from .util import async_get_config_entry_data_for_host
 
@@ -105,6 +107,113 @@ def _filter_duplicate_meters(
 def _normalize_serial(serial_number: Any) -> str:
     """Normalize a serial number for comparisons."""
     return str(serial_number).lower()
+
+
+def _merge_serial_list(existing: list, detected: list) -> list:
+    """Merge serial-number lists while preserving existing order."""
+    merged = []
+    known = set()
+    for serial_number in (*existing, *detected):
+        normalized = _normalize_serial(serial_number)
+        if normalized not in known:
+            merged.append(serial_number)
+            known.add(normalized)
+    return merged
+
+
+def _remove_serials(serial_numbers: list, remove_serials: set[str]) -> list:
+    """Remove serials from a list."""
+    return [
+        serial_number
+        for serial_number in serial_numbers
+        if _normalize_serial(serial_number) not in remove_serials
+    ]
+
+
+def _merge_ports(existing: list[dict], detected: list[dict]) -> list[dict]:
+    """Merge port lists by inverter serial and port number."""
+    merged = []
+    known = set()
+    for port in (*existing, *detected):
+        key = (
+            _normalize_serial(port.get("inverter_serial_number")),
+            port.get("port_number"),
+        )
+        if key not in known:
+            merged.append(port)
+            known.add(key)
+    return merged
+
+
+def _merge_hybrid_inverters(existing: list[dict], detected: list[dict]) -> list[dict]:
+    """Merge hybrid inverter config data by inverter serial."""
+    merged = []
+    known = set()
+    for inverter in (*existing, *detected):
+        normalized = _normalize_serial(inverter.get("inverter_serial_number"))
+        if normalized not in known:
+            merged.append(inverter)
+            known.add(normalized)
+    return merged
+
+
+def _merge_reconfigured_inverters(
+    existing_data: dict,
+    detected_single_phase_inverters: list,
+    detected_three_phase_inverters: list,
+    detected_ports: list[dict],
+    detected_hybrid_inverters: list[dict],
+    delete_missing_inverters: bool,
+) -> tuple[list, list, list[dict], list[dict]]:
+    """Return the inverter data that should be stored after reconfigure."""
+    if delete_missing_inverters:
+        return (
+            detected_single_phase_inverters,
+            detected_three_phase_inverters,
+            detected_ports,
+            detected_hybrid_inverters,
+        )
+
+    detected_single_serials = {
+        _normalize_serial(serial_number)
+        for serial_number in detected_single_phase_inverters
+    }
+    detected_three_serials = {
+        _normalize_serial(serial_number)
+        for serial_number in detected_three_phase_inverters
+    }
+    detected_hybrid_serials = {
+        _normalize_serial(inverter.get("inverter_serial_number"))
+        for inverter in detected_hybrid_inverters
+    }
+
+    single_phase_inverters = _merge_serial_list(
+        _remove_serials(
+            existing_data.get(CONF_INVERTERS, []),
+            detected_three_serials | detected_hybrid_serials,
+        ),
+        detected_single_phase_inverters,
+    )
+    three_phase_inverters = _merge_serial_list(
+        _remove_serials(
+            existing_data.get(CONF_THREE_PHASE_INVERTERS, []),
+            detected_single_serials | detected_hybrid_serials,
+        ),
+        detected_three_phase_inverters,
+    )
+
+    existing_hybrid_inverters = [
+        inverter
+        for inverter in existing_data.get(CONF_HYBRID_INVERTERS, [])
+        if _normalize_serial(inverter.get("inverter_serial_number"))
+        not in detected_single_serials | detected_three_serials
+    ]
+    hybrid_inverters = _merge_hybrid_inverters(
+        existing_hybrid_inverters, detected_hybrid_inverters
+    )
+    ports = _merge_ports(existing_data.get(CONF_PORTS, []), detected_ports)
+
+    return single_phase_inverters, three_phase_inverters, ports, hybrid_inverters
 
 
 def _detected_inverter_serials(
@@ -311,6 +420,9 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 ),
             )
             meter_type = user_input.get(CONF_METER_TYPE, METER_TYPE_AUTO)
+            delete_missing_inverters = user_input.get(
+                CONF_DELETE_MISSING_INVERTERS, False
+            )
 
             try:
                 (
@@ -339,6 +451,19 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                     hybrid_inverters,
                     entry.entry_id,
                 )
+                (
+                    single_phase_inverters,
+                    three_phase_inverters,
+                    ports,
+                    hybrid_inverters,
+                ) = _merge_reconfigured_inverters(
+                    entry.data,
+                    single_phase_inverters,
+                    three_phase_inverters,
+                    ports,
+                    hybrid_inverters,
+                    delete_missing_inverters,
+                )
 
                 data = {
                     CONF_HOST: host,
@@ -359,6 +484,7 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 self.hass.config_entries.async_update_entry(
                     entry, data=data, version=CONFIG_VERSION
                 )
+                await async_migrate_entity_unique_ids(self.hass, entry.entry_id, data)
                 result = await self.hass.config_entries.async_reload(entry.entry_id)
                 if not result:
                     errors["base"] = "unknown"
@@ -410,6 +536,10 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                             METER_TYPE_THREE_PHASE,
                         ]
                     ),
+                    vol.Optional(
+                        CONF_DELETE_MISSING_INVERTERS,
+                        default=False,
+                    ): bool,
                 }
             ),
             errors=errors,

@@ -4,7 +4,7 @@ DOMAIN = "hoymiles_wifi"
 NAME = "Hoymiles"
 DOMAIN = "hoymiles_wifi"
 DOMAIN_DATA = f"{DOMAIN}_data"
-CONFIG_VERSION = 5
+CONFIG_VERSION = 6
 
 ISSUE_URL = "https://github.com/hmsta/ha-hoymiles-wifi/issues"
 
@@ -17,6 +17,7 @@ CONF_HYBRID_INVERTERS = "hybrid_inverters"
 CONF_PORTS = "ports"
 CONF_METERS = "meters"
 CONF_METER_TYPE = "meter_type"
+CONF_DELETE_MISSING_INVERTERS = "delete_missing_inverters"
 CONF_IS_ENCRYPTED = "is_encrypted"
 CONF_ENC_RAND = "enc_rand"
 CONF_TIMEOUT = "timeout"

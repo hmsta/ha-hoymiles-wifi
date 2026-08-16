@@ -9,7 +9,8 @@
           "update_interval": "Intervalle de mise à jour (secondes)",
           "timeout": "Délai d'attente (secondes)",
           "startup_cooldown": "Délai de démarrage (secondes)",
-          "meter_type": "Type de compteur"
+          "meter_type": "Type de compteur",
+          "delete_missing_inverters": "Supprimer les onduleurs manquants"
         }
       },
       "reconfigure": {
@@ -20,7 +21,8 @@
           "update_interval": "Intervalle de mise à jour (secondes)",
           "timeout": "Délai d'attente (secondes)",
           "startup_cooldown": "Délai de démarrage (secondes)",
-          "meter_type": "Type de compteur"
+          "meter_type": "Type de compteur",
+          "delete_missing_inverters": "Supprimer les onduleurs manquants"
         }
       }
     },

@@ -9,7 +9,8 @@
           "update_interval": "Update Interval (seconds)",
           "timeout": "Timeout (seconds)",
           "startup_cooldown": "Startup cooldown (seconds)",
-          "meter_type": "Meter type"
+          "meter_type": "Meter type",
+          "delete_missing_inverters": "Delete missing inverters"
         }
       },
       "reconfigure": {
@@ -20,7 +21,8 @@
           "update_interval": "Update Interval (seconds)",
           "timeout": "Timeout (seconds)",
           "startup_cooldown": "Startup cooldown (seconds)",
-          "meter_type": "Meter type"
+          "meter_type": "Meter type",
+          "delete_missing_inverters": "Delete missing inverters"
         }
       }
     },

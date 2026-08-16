@@ -9,7 +9,8 @@
           "update_interval": "Aktualisierungsintervall (Sekunden)",
           "timeout": "Timeout (Sekunden)",
           "startup_cooldown": "Startverzögerung (Sekunden)",
-          "meter_type": "Zählertyp"
+          "meter_type": "Zählertyp",
+          "delete_missing_inverters": "Fehlende Wechselrichter löschen"
         }
       },
       "reconfigure": {
@@ -20,7 +21,8 @@
           "update_interval": "Aktualisierungsintervall (Sekunden)",
           "timeout": "Timeout (Sekunden)",
           "startup_cooldown": "Startverzögerung (Sekunden)",
-          "meter_type": "Zählertyp"
+          "meter_type": "Zählertyp",
+          "delete_missing_inverters": "Fehlende Wechselrichter löschen"
         }
       }
     },
