@@ -11,6 +11,7 @@
   const DEFAULT_REPLAY_END_HOUR = 19;
   const DEFAULT_HISTORY_BATCH_SIZE = 80;
   const REPLAY_CACHE_TTL_MS = 5 * 60 * 1000;
+  const TAP_MOVE_THRESHOLD_PX = 8;
   const DEFAULT_CROP_X = 0.5;
   const DEFAULT_CROP_Y = 1;
 
@@ -826,6 +827,7 @@
       this._historyCache = null;
       this._activePointers = new Map();
       this._dragStart = null;
+      this._suppressNextEntityClick = false;
       this._pinchStart = null;
       this._resizeObserver = null;
       this._renderQueued = false;
@@ -2152,8 +2154,7 @@
       if (moreInfoEntityId) {
         item.dataset.entityId = moreInfoEntityId;
         item.onclick = (event) => {
-          event.stopPropagation();
-          fireEvent(this, "hass-more-info", { entityId: moreInfoEntityId });
+          this._openMoreInfoFromClick(event, moreInfoEntityId);
         };
       } else {
         delete item.dataset.entityId;
@@ -2301,8 +2302,7 @@
       if (metric.entityId) {
         marker.dataset.entityId = metric.entityId;
         marker.onclick = (event) => {
-          event.stopPropagation();
-          fireEvent(this, "hass-more-info", { entityId: metric.entityId });
+          this._openMoreInfoFromClick(event, metric.entityId);
         };
       } else {
         delete marker.dataset.entityId;
@@ -2411,24 +2411,71 @@
       };
     }
 
+    _entityTargetFromEvent(event) {
+      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+      for (const node of path) {
+        if (node && node.dataset && node.dataset.entityId) return node;
+        if (node === this._map) break;
+      }
+      const target = event.target && typeof event.target.closest === "function"
+        ? event.target.closest("[data-entity-id]")
+        : null;
+      return target && this._map && this._map.contains(target) ? target : null;
+    }
+
+    _openMoreInfo(entityId) {
+      if (!entityId) return;
+      fireEvent(this, "hass-more-info", { entityId });
+    }
+
+    _openMoreInfoFromClick(event, entityId) {
+      event.stopPropagation();
+      if (this._suppressNextEntityClick) {
+        event.preventDefault();
+        return;
+      }
+      this._openMoreInfo(entityId);
+    }
+
+    _markPointerMoved(pointer) {
+      if (!pointer) return false;
+      const dx = pointer.x - pointer.startX;
+      const dy = pointer.y - pointer.startY;
+      if (Math.hypot(dx, dy) > TAP_MOVE_THRESHOLD_PX) pointer.moved = true;
+      return pointer.moved;
+    }
+
     _bindPanZoom() {
       if (!this._map || this._map.dataset.bound === "1") return;
       this._map.dataset.bound = "1";
 
       this._map.addEventListener("pointerdown", (event) => {
-        this._activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (event.pointerType === "mouse" && event.button !== 0) return;
+        const entityTarget = this._entityTargetFromEvent(event);
+        this._activePointers.set(event.pointerId, {
+          x: event.clientX,
+          y: event.clientY,
+          startX: event.clientX,
+          startY: event.clientY,
+          moved: false,
+          entityId: entityTarget ? entityTarget.dataset.entityId : "",
+        });
         this._map.setPointerCapture(event.pointerId);
-        this._map.classList.add("dragging");
         this._dragStart = { x: event.clientX, y: event.clientY };
         this._pinchStart = this._pinchSnapshot();
       });
 
       this._map.addEventListener("pointermove", (event) => {
         if (!this._activePointers.has(event.pointerId)) return;
-        const previous = this._activePointers.get(event.pointerId);
-        this._activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        const pointer = this._activePointers.get(event.pointerId);
+        const previous = { x: pointer.x, y: pointer.y };
+        pointer.x = event.clientX;
+        pointer.y = event.clientY;
+        this._markPointerMoved(pointer);
 
         if (this._activePointers.size >= 2) {
+          for (const active of this._activePointers.values()) active.moved = true;
+          this._map.classList.add("dragging");
           const pinch = this._pinchSnapshot();
           if (this._pinchStart && pinch && this._pinchStart.distance > 0) {
             this._state.viewScale = this._clampZoom(this._pinchStart.scale * pinch.distance / this._pinchStart.distance);
@@ -2443,15 +2490,20 @@
           return;
         }
 
-        if (previous) {
-          const delta = this._nativeDeltaFromCss(event.clientX - previous.x, event.clientY - previous.y);
-          this._state.offsetX += delta.x;
-          this._state.offsetY += delta.y;
-          this._scheduleRender();
-        }
+        if (!pointer.moved) return;
+        this._map.classList.add("dragging");
+        const delta = this._nativeDeltaFromCss(event.clientX - previous.x, event.clientY - previous.y);
+        this._state.offsetX += delta.x;
+        this._state.offsetY += delta.y;
+        this._scheduleRender();
       });
 
       const stopPointer = (event) => {
+        const pointer = this._activePointers.get(event.pointerId);
+        const isTap = pointer
+          && pointer.entityId
+          && !pointer.moved
+          && this._activePointers.size === 1;
         this._activePointers.delete(event.pointerId);
         if (this._map.hasPointerCapture(event.pointerId)) {
           this._map.releasePointerCapture(event.pointerId);
@@ -2461,6 +2513,17 @@
           this._map.classList.remove("dragging");
           this._dragStart = null;
           this._pinchStart = null;
+        }
+        if (pointer && pointer.entityId) {
+          this._suppressNextEntityClick = true;
+          window.setTimeout(() => {
+            this._suppressNextEntityClick = false;
+          }, 350);
+        }
+        if (isTap) {
+          event.preventDefault();
+          event.stopPropagation();
+          this._openMoreInfo(pointer.entityId);
         }
       };
 
