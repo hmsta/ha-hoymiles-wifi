@@ -224,6 +224,7 @@ height: 80vh
 min_height: 520px
 initial_zoom: 1
 max_zoom: 30
+panel_text_min_zoom: 4
 replay_step_seconds: 3600
 replay_start_hour: "06:00"
 replay_end_hour: "19:00"
@@ -242,7 +243,7 @@ Hoymiles serial numbers from the layout JSON are lowercased before building thes
 
 Use the `RSSI`/`W`/`Wh` buttons on the card to switch between inverter signal strength, current DC power, and daily DC energy. Values are rounded to whole digits. In `RSSI` mode, panels are hidden and one signal marker is shown per inverter at `signal_anchor_port` (`3` by default). If `rssi_ok_dbm` and `rssi_bad_dbm` are both set, signal icons are green at or above `rssi_ok_dbm`, orange between the thresholds, and red at or below `rssi_bad_dbm`; missing, unavailable, or non-negative RSSI values are treated as offline/gray. Without valid thresholds the card keeps its default signal coloring. In `W` mode, panel fill uses `max_watts` as the 100% reference. In `Wh` mode, panel fill uses the highest visible panel daily-energy value as the 100% reference, ignoring values below `off_threshold_watts` so ghost production stays dark/off.
 
-Set `height` to override the default aspect-ratio sizing, for example `height: 80vh` or `height: calc(100dvh - 120px)` for a phone dashboard. The aliases `map_height` and `card_height` are also accepted. Set `initial_zoom` for the starting zoom and `max_zoom` to allow deeper pinch/wheel zoom; the defaults are `1` and `15`.
+Set `height` to override the default aspect-ratio sizing, for example `height: 80vh` or `height: calc(100dvh - 120px)` for a phone dashboard. The aliases `map_height` and `card_height` are also accepted. Set `initial_zoom` for the starting zoom and `max_zoom` to allow deeper pinch/wheel zoom; the defaults are `1` and `15`. Set `panel_text_min_zoom` to hide panel values and serial labels until that zoom level; the default is `1`.
 
 The `Replay` button switches the `W` view from live values to Home Assistant history for the current day. History is loaded only when replay is opened, compressed to hourly samples by default, and cached in the browser. The default replay window is 06:00-19:00. Set `show_replay_control: false` to hide the button, adjust `replay_step_seconds` for finer/coarser jumps, or set `replay_start_hour` / `replay_end_hour` to change the daily window. Replay hours accept values like `6`, `"06:00"`, or `"6am"`.
 
