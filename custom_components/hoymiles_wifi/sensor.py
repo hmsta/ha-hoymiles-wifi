@@ -62,6 +62,26 @@ from .entity import (
 _LOGGER = logging.getLogger(__name__)
 
 _MISSING = object()
+INVERTER_LIVE_FIELDS = (
+    "active_power",
+    "current",
+    "current_phase_A",
+    "current_phase_B",
+    "current_phase_C",
+    "frequency",
+    "modulation_index_signal",
+    "power_factor",
+    "reactive_power",
+    "temperature",
+    "voltage",
+    "voltage_line_AB",
+    "voltage_line_BC",
+    "voltage_line_CA",
+    "voltage_phase_A",
+    "voltage_phase_B",
+    "voltage_phase_C",
+)
+PV_LIVE_FIELDS = ("current", "power", "voltage")
 
 
 class ConversionAction(Enum):
@@ -1564,6 +1584,34 @@ class HoymilesDataSensorEntity(HoymilesCoordinatorEntity, RestoreSensor):
 
         return None
 
+    @staticmethod
+    def _has_non_default_value(item, field_name: str) -> bool:
+        """Return if a protobuf scalar field carries non-default live data."""
+        value = getattr(item, field_name, None)
+        return value not in (None, 0, "", False)
+
+    def _inverter_live_data_available(self, inverter_item) -> bool:
+        """Return if an inverter row contains live telemetry."""
+        if inverter_item is None or inverter_item is _MISSING:
+            return False
+
+        return any(
+            self._has_non_default_value(inverter_item, field_name)
+            for field_name in INVERTER_LIVE_FIELDS
+        )
+
+    def _parent_inverter_live_data_available(self) -> bool:
+        """Return if the parent inverter currently has live telemetry."""
+        for attribute_name in ("sgs_data", "tgs_data"):
+            inverter_item = self._serial_matched_list_item(
+                attribute_name,
+                getattr(self.coordinator.data, attribute_name, []),
+            )
+            if self._inverter_live_data_available(inverter_item):
+                return True
+
+        return False
+
     def update_state_value(self):
         """Update the state value of the sensor based on the coordinator data."""
         new_native_value = 0.0
@@ -1596,7 +1644,21 @@ class HoymilesDataSensorEntity(HoymilesCoordinatorEntity, RestoreSensor):
                 if serial_matched_item is None:
                     new_native_value = None
                 elif nested_attribute is not None:
-                    new_native_value = getattr(serial_matched_item, nested_attribute, None)
+                    new_native_value = getattr(
+                        serial_matched_item, nested_attribute, None
+                    )
+                    if (
+                        attribute_name in ("sgs_data", "tgs_data")
+                        and nested_attribute in INVERTER_LIVE_FIELDS
+                        and not self._inverter_live_data_available(serial_matched_item)
+                    ):
+                        new_native_value = None
+                    elif (
+                        attribute_name == "pv_data"
+                        and nested_attribute in PV_LIVE_FIELDS
+                        and not self._parent_inverter_live_data_available()
+                    ):
+                        new_native_value = None
                 else:
                     new_native_value = serial_matched_item
             elif index < len(attribute):
