@@ -1618,6 +1618,12 @@ class HoymilesDataSensorEntity(HoymilesCoordinatorEntity, RestoreSensor):
                 self.coordinator.data, self._attribute_name, None
             )
 
+        if (
+            self._attribute_name.endswith(".modulation_index_signal")
+            and new_native_value == 0
+        ):
+            new_native_value = None
+
         if new_native_value is not None and self._conversion_factor is not None:
             new_native_value *= self._conversion_factor
 
