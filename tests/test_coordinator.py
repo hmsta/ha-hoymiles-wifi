@@ -169,6 +169,132 @@ def test_daily_energy_accepts_first_value_after_startup_unknown() -> None:
     assert entity.native_value == 1234
 
 
+def test_daily_energy_keeps_same_day_max_but_can_reset_to_zero() -> None:
+    """Test daily energy preserves same-day max values and permits midnight reset."""
+    config_entry = SimpleNamespace(
+        entry_id="entry-a",
+        data={CONF_DTU_SERIAL_NUMBER: "4121a01953c8"},
+    )
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(dtu_daily_energy=1234),
+        startup_refresh_pending=False,
+    )
+    entity = HoymilesEnergySensorEntity(
+        config_entry,
+        HoymilesSensorEntityDescription(
+            key="dtu_daily_energy",
+            serial_number="4121a01953c8",
+            is_dtu_sensor=True,
+            reset_at_midnight=True,
+            force_keep_maximum_within_day=True,
+        ),
+        coordinator,
+    )
+
+    assert entity.native_value == 1234
+
+    coordinator.data = SimpleNamespace(dtu_daily_energy=0)
+    entity.update_state_value()
+
+    assert entity._native_value == 1234
+    assert entity.native_value == 1234
+
+    entity.reset_sensor_value()
+
+    assert entity.native_value == 0.0
+    assert entity.assumed_state is False
+
+
+def test_port_daily_energy_keeps_same_day_max_without_explicit_force_flag() -> None:
+    """Test port daily energy follows daily-counter semantics by reset flag alone."""
+    config_entry = SimpleNamespace(
+        entry_id="entry-a",
+        data={CONF_DTU_SERIAL_NUMBER: "4121a01953c8"},
+    )
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            pv_data=[
+                SimpleNamespace(
+                    serial_number=22134652556250,
+                    port_number=1,
+                    energy_daily=1530,
+                ),
+            ]
+        ),
+        startup_refresh_pending=False,
+    )
+    entity = HoymilesEnergySensorEntity(
+        config_entry,
+        HoymilesSensorEntityDescription(
+            key="pv_data[0].energy_daily",
+            serial_number="1421a01a53da",
+            port_number=1,
+            reset_at_midnight=True,
+        ),
+        coordinator,
+    )
+
+    assert entity.native_value == 1530
+
+    coordinator.data = SimpleNamespace(
+        pv_data=[
+            SimpleNamespace(
+                serial_number=22134652556250,
+                port_number=1,
+                energy_daily=0,
+            ),
+        ]
+    )
+    entity.update_state_value()
+
+    assert entity._native_value == 1530
+    assert entity.native_value == 1530
+
+
+def test_total_energy_still_protects_against_zero_payload() -> None:
+    """Test total energy does not publish a transient zero as a counter reset."""
+    config_entry = SimpleNamespace(
+        entry_id="entry-a",
+        data={CONF_DTU_SERIAL_NUMBER: "4121a01953c8"},
+    )
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            pv_data=[
+                SimpleNamespace(
+                    serial_number=22134652556250,
+                    port_number=1,
+                    energy_total=25000,
+                ),
+            ]
+        ),
+        startup_refresh_pending=False,
+    )
+    entity = HoymilesEnergySensorEntity(
+        config_entry,
+        HoymilesSensorEntityDescription(
+            key="pv_data[0].energy_total",
+            serial_number="1421a01a53da",
+            port_number=1,
+        ),
+        coordinator,
+    )
+
+    assert entity.native_value == 25000
+
+    coordinator.data = SimpleNamespace(
+        pv_data=[
+            SimpleNamespace(
+                serial_number=22134652556250,
+                port_number=1,
+                energy_total=0,
+            ),
+        ]
+    )
+    entity.update_state_value()
+
+    assert entity.native_value == 25000
+
+
 def test_inverter_sensor_reads_real_data_by_serial_not_stored_index() -> None:
     """Test real-data inverter sensors do not trust discovery order."""
     config_entry = SimpleNamespace(

@@ -1707,7 +1707,10 @@ class HoymilesDataSensorEntity(HoymilesCoordinatorEntity, RestoreSensor):
 
         if (
             new_native_value is not None
-            and self.entity_description.force_keep_maximum_within_day
+            and (
+                self.entity_description.force_keep_maximum_within_day
+                or self.entity_description.reset_at_midnight
+            )
             and self._native_value is not None
             and self._last_update_state is not None
             and self._last_update_state.date() == datetime.now().date()
@@ -1754,7 +1757,13 @@ class HoymilesEnergySensorEntity(HoymilesDataSensorEntity, RestoreSensor):
 
     def reset_sensor_value(self):
         """Reset the sensor value."""
+        self._native_value = 0.0
         self._last_known_value = 0
+        self._last_successful_update = datetime.now()
+        self._last_update_state = datetime.now()
+        self._assumed_state = False
+        if getattr(self, "hass", None) is not None:
+            self.async_write_ha_state()
 
     @property
     def native_value(self):
@@ -1762,6 +1771,11 @@ class HoymilesEnergySensorEntity(HoymilesDataSensorEntity, RestoreSensor):
         super_native_value = super().native_value
         # For an energy sensor a value of 0 would mess up long term stats because of how total_increasing works
         if super_native_value == 0.0:
+            if self.entity_description.reset_at_midnight:
+                self._last_known_value = 0.0
+                self._assumed_state = False
+                return super_native_value
+
             _LOGGER.debug(
                 "Returning last known value instead of 0.0 for %s to avoid resetting total_increasing counter",
                 self.name,
