@@ -223,7 +223,16 @@ async def _async_get_lovelace_resources(hass: HomeAssistant):
         if not await async_setup_component(hass, LOVELACE_DOMAIN, {}):
             return None
 
-    return hass.data.get(LOVELACE_DOMAIN, {}).get(LOVELACE_RESOURCES)
+    return _lovelace_resources_from_data(hass.data.get(LOVELACE_DOMAIN))
+
+
+def _lovelace_resources_from_data(lovelace_data):
+    """Return Lovelace resources from old dict data or newer LovelaceData."""
+    if lovelace_data is None:
+        return None
+    if isinstance(lovelace_data, dict):
+        return lovelace_data.get(LOVELACE_RESOURCES)
+    return getattr(lovelace_data, LOVELACE_RESOURCES, None)
 
 
 def _frontend_card_resource_url() -> str:

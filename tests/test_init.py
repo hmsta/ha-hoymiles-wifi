@@ -7,6 +7,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.hoymiles_wifi import (
     _async_register_lovelace_resource,
     _frontend_card_resource_url,
+    _lovelace_resources_from_data,
     _resource_base_url,
     async_remove_config_entry_device,
 )
@@ -58,6 +59,13 @@ class FakeLovelaceResources:
                 item["type"] = data["res_type"]
                 return item
         return None
+
+
+class FakeLovelaceData:
+    """Minimal object-style Lovelace data used by newer Home Assistant releases."""
+
+    def __init__(self, resources):
+        self.resources = resources
 
 
 async def test_async_setup(hass):
@@ -126,6 +134,13 @@ def test_frontend_card_resource_url_uses_js_mtime():
 
     assert _resource_base_url(url) == "/hoymiles_wifi_static/hoymiles-layout-card.js"
     assert "?v=" in url
+
+
+def test_lovelace_resources_from_object_data():
+    """Test object-style LovelaceData exposes resources."""
+    resources = FakeLovelaceResources()
+
+    assert _lovelace_resources_from_data(FakeLovelaceData(resources)) is resources
 
 
 async def test_remove_meter_device_updates_config_entry(hass):
