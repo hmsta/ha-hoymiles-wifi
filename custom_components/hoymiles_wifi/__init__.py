@@ -7,7 +7,7 @@ from pathlib import Path
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, Platform
+from homeassistant.const import CONF_HOST, CONF_ID, CONF_TYPE, CONF_URL, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.typing import ConfigType
@@ -56,6 +56,11 @@ PLATFORMS = [Platform.SENSOR, Platform.NUMBER, Platform.BINARY_SENSOR, Platform.
 FRONTEND_DIR = Path(__file__).parent / "frontend"
 FRONTEND_URL = f"/{DOMAIN}_static"
 FRONTEND_CARD_FILENAME = "hoymiles-layout-card.js"
+FRONTEND_CARD_URL = f"{FRONTEND_URL}/{FRONTEND_CARD_FILENAME}"
+FRONTEND_CARD_RESOURCE_TYPE = "module"
+LOVELACE_DOMAIN = "lovelace"
+LOVELACE_RESOURCES = "resources"
+LOVELACE_RESOURCE_TYPE = "res_type"
 
 SET_BMS_SCHEMA = vol.Schema(
     {
@@ -91,16 +96,32 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
 async def _async_register_frontend(hass: HomeAssistant) -> None:
     """Register bundled frontend assets for the Hoymiles layout card."""
     hass.data.setdefault(DOMAIN, {})
-    if hass.data[DOMAIN].get("frontend_registered"):
-        return
+
+    if not (
+        hass.data[DOMAIN].get("frontend_static_registered")
+        or hass.data[DOMAIN].get("frontend_registered")
+    ):
+        await _async_register_static_frontend(hass)
+        hass.data[DOMAIN]["frontend_static_registered"] = True
+        hass.data[DOMAIN]["frontend_registered"] = True
+
+    await _async_register_lovelace_resource(hass)
+
+
+async def _async_register_static_frontend(hass: HomeAssistant) -> None:
+    """Register the static frontend path."""
 
     try:
-        from homeassistant.components.http import StaticPathConfig  # pylint: disable=import-outside-toplevel
+        from homeassistant.components.http import (  # pylint: disable=import-outside-toplevel
+            StaticPathConfig,
+        )
     except ImportError:
         StaticPathConfig = None
 
     try:
-        from homeassistant.components.http import async_register_static_paths  # pylint: disable=import-outside-toplevel
+        from homeassistant.components.http import (  # pylint: disable=import-outside-toplevel
+            async_register_static_paths,
+        )
     except ImportError:
         async_register_static_paths = None
 
@@ -138,7 +159,86 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     else:
         raise RuntimeError("Home Assistant static path registration API is unavailable")
 
-    hass.data[DOMAIN]["frontend_registered"] = True
+
+async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
+    """Create or update the Lovelace resource for the layout card."""
+    resources = await _async_get_lovelace_resources(hass)
+    if resources is None:
+        _LOGGER.debug("Lovelace resources are unavailable; skipping frontend resource")
+        return
+
+    can_update_resources = hasattr(resources, "async_create_item") and hasattr(
+        resources, "async_update_item"
+    )
+    if not can_update_resources:
+        _LOGGER.debug(
+            "Lovelace resources are read-only; skipping frontend resource update"
+        )
+        return
+
+    await resources.async_get_info()
+
+    resource_url = _frontend_card_resource_url()
+    resource_items = resources.async_items() or []
+    for item in resource_items:
+        if _resource_base_url(item.get(CONF_URL, "")) != FRONTEND_CARD_URL:
+            continue
+
+        resource_id = item.get(CONF_ID)
+        if not resource_id:
+            _LOGGER.debug("Lovelace resource for %s has no id", FRONTEND_CARD_URL)
+            return
+
+        if (
+            item.get(CONF_URL) != resource_url
+            or item.get(CONF_TYPE) != FRONTEND_CARD_RESOURCE_TYPE
+        ):
+            await resources.async_update_item(
+                resource_id,
+                {
+                    CONF_URL: resource_url,
+                    LOVELACE_RESOURCE_TYPE: FRONTEND_CARD_RESOURCE_TYPE,
+                },
+            )
+        return
+
+    await resources.async_create_item(
+        {
+            CONF_URL: resource_url,
+            LOVELACE_RESOURCE_TYPE: FRONTEND_CARD_RESOURCE_TYPE,
+        }
+    )
+
+
+async def _async_get_lovelace_resources(hass: HomeAssistant):
+    """Return Lovelace resources, setting up Lovelace first if needed."""
+    if LOVELACE_DOMAIN not in hass.data:
+        try:
+            from homeassistant.setup import (  # pylint: disable=import-outside-toplevel
+                async_setup_component,
+            )
+        except ImportError:
+            return None
+
+        if not await async_setup_component(hass, LOVELACE_DOMAIN, {}):
+            return None
+
+    return hass.data.get(LOVELACE_DOMAIN, {}).get(LOVELACE_RESOURCES)
+
+
+def _frontend_card_resource_url() -> str:
+    """Return the cache-busted Lovelace URL for the bundled layout card."""
+    try:
+        version = (FRONTEND_DIR / FRONTEND_CARD_FILENAME).stat().st_mtime_ns
+    except OSError:
+        version = 0
+
+    return f"{FRONTEND_CARD_URL}?v={version}"
+
+
+def _resource_base_url(url: str) -> str:
+    """Return a Lovelace resource URL without its cache-busting query string."""
+    return url.split("?", 1)[0]
 
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
