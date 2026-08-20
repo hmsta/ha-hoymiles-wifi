@@ -1,6 +1,7 @@
 """Entity base for Hoymiles entities."""
 
 from dataclasses import dataclass
+from functools import lru_cache
 import logging
 
 from enum import Enum
@@ -23,6 +24,23 @@ from .coordinator import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+_INVERTER_MODEL_OVERRIDES = {
+    "1421": "HMS-2000D-4T",
+}
+
+
+@lru_cache(maxsize=512)
+def _get_inverter_model_name(serial_number: str | None) -> str:
+    """Return inverter model name without repeatedly logging known unknowns."""
+    serial_number = str(serial_number or "").strip().lower()
+    model_override = _INVERTER_MODEL_OVERRIDES.get(serial_number[:4])
+    if model_override:
+        return model_override
+    if not serial_number:
+        return "Unknown"
+
+    return get_inverter_model_name(serial_number)
 
 
 class DeviceType(Enum):
@@ -87,7 +105,7 @@ class HoymilesEntity(Entity):
                     device_model = self.entity_description.model_name
                     device_name = "Hybrid inverter"
                 else:
-                    device_model = get_inverter_model_name(
+                    device_model = _get_inverter_model_name(
                         self.entity_description.serial_number
                     )
                     device_name = "Inverter"

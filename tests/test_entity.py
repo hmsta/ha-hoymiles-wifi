@@ -7,6 +7,7 @@ from custom_components.hoymiles_wifi.const import CONF_DTU_SERIAL_NUMBER, DOMAIN
 from custom_components.hoymiles_wifi.entity import (
     HoymilesEntity,
     HoymilesEntityDescription,
+    _get_inverter_model_name,
 )
 
 
@@ -49,7 +50,8 @@ def test_dtu_device_name_includes_serial() -> None:
 
 def test_inverter_device_name_includes_serial() -> None:
     """Test inverter device name includes serial number."""
-    inverter_serial = "1421a01a4525"
+    inverter_serial = "1121a01a4525"
+    _get_inverter_model_name.cache_clear()
 
     with patch(
         "custom_components.hoymiles_wifi.entity.get_inverter_model_name",
@@ -62,10 +64,29 @@ def test_inverter_device_name_includes_serial() -> None:
             )
         )
 
-    assert device_info["name"] == "Inverter 1421A01A4525"
+    assert device_info["name"] == "Inverter 1121A01A4525"
     assert device_info["identifiers"] == {(DOMAIN, inverter_serial)}
-    assert device_info["serial_number"] == "1421A01A4525"
+    assert device_info["serial_number"] == "1121A01A4525"
     assert device_info["via_device"] == (DOMAIN, DTU_SERIAL_NUMBER)
+
+
+def test_inverter_1421_device_uses_hms_2000d_4t_model_override() -> None:
+    """Test HMS-2000D-4T serials avoid the noisy library model lookup."""
+    inverter_serial = "1421a01a4525"
+    _get_inverter_model_name.cache_clear()
+
+    with patch(
+        "custom_components.hoymiles_wifi.entity.get_inverter_model_name",
+        side_effect=AssertionError("library lookup should not be called"),
+    ):
+        device_info = _device_info(
+            HoymilesEntityDescription(
+                key="sgs_data[0].current",
+                serial_number=inverter_serial,
+            )
+        )
+
+    assert device_info["model"] == "HMS-2000D-4T"
 
 
 def test_meter_device_name_includes_serial() -> None:
