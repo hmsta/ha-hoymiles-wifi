@@ -13,7 +13,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from hoymiles_wifi.hoymiles import generate_inverter_serial_number
 
-from .const import DOMAIN
+from .const import (
+    CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
+    DEFAULT_METER_ENERGY_CONSISTENCY_TOLERANCE,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,8 +43,6 @@ ENERGY_CONSISTENCY_GROUPS = (
         ),
     ),
 )
-
-ENERGY_CONSISTENCY_TOLERANCE = 1
 
 IGNORED_METER_FIELDS = {"serial_number"}
 
@@ -73,6 +75,7 @@ class HoymilesSharedMeterCoordinator(DataUpdateCoordinator):
             "last_source_timestamp": timestamp,
             "last_source_updated_at": datetime.now().isoformat(),
         }
+        consistency_tolerance = self._energy_consistency_tolerance(config_entry)
 
         for meter_data in real_data.meter_data:
             meter_serial = generate_inverter_serial_number(meter_data.serial_number)
@@ -81,7 +84,11 @@ class HoymilesSharedMeterCoordinator(DataUpdateCoordinator):
             present_fields = {field.name for field, _value in meter_data.ListFields()}
 
             if self._sample_has_inconsistent_energy(
-                meter_data, meter_serial, dtu_serial, present_fields
+                meter_data,
+                meter_serial,
+                dtu_serial,
+                present_fields,
+                consistency_tolerance,
             ) or self._sample_has_stale_energy(
                 meter_data, meter_serial, dtu_serial, existing_values, present_fields
             ):
@@ -169,6 +176,22 @@ class HoymilesSharedMeterCoordinator(DataUpdateCoordinator):
             self.async_set_updated_data(data)
 
     @staticmethod
+    def _energy_consistency_tolerance(config_entry: ConfigEntry) -> int:
+        """Return the configured allowed total-vs-phase energy mismatch."""
+        try:
+            return max(
+                0,
+                int(
+                    config_entry.data.get(
+                        CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
+                        DEFAULT_METER_ENERGY_CONSISTENCY_TOLERANCE,
+                    )
+                ),
+            )
+        except (TypeError, ValueError):
+            return DEFAULT_METER_ENERGY_CONSISTENCY_TOLERANCE
+
+    @staticmethod
     def _sample_has_stale_energy(
         meter_data: Any,
         meter_serial: str,
@@ -203,6 +226,7 @@ class HoymilesSharedMeterCoordinator(DataUpdateCoordinator):
         meter_serial: str,
         dtu_serial: str,
         present_fields: set[str],
+        tolerance: int,
     ) -> bool:
         """Return true if complete cumulative totals do not match phase sums."""
         for total_field, phase_fields in ENERGY_CONSISTENCY_GROUPS:
@@ -212,14 +236,15 @@ class HoymilesSharedMeterCoordinator(DataUpdateCoordinator):
 
             total = getattr(meter_data, total_field)
             phase_sum = sum(getattr(meter_data, field) for field in phase_fields)
-            if abs(total - phase_sum) > ENERGY_CONSISTENCY_TOLERANCE:
+            if abs(total - phase_sum) > tolerance:
                 _LOGGER.debug(
-                    "Ignoring inconsistent meter sample for meter %s from DTU %s because %s=%s does not match phase sum %s",
+                    "Ignoring inconsistent meter sample for meter %s from DTU %s because %s=%s does not match phase sum %s within tolerance %s",
                     meter_serial,
                     dtu_serial,
                     total_field,
                     total,
                     phase_sum,
+                    tolerance,
                 )
                 return True
 

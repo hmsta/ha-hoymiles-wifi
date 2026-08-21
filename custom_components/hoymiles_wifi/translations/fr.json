@@ -10,6 +10,7 @@
           "timeout": "Délai d'attente (secondes)",
           "startup_cooldown": "Délai de démarrage (secondes)",
           "meter_type": "Type de compteur",
+          "meter_energy_consistency_tolerance": "Tolérance de cohérence énergétique du compteur",
           "delete_missing_inverters": "Supprimer les onduleurs manquants"
         }
       },
@@ -22,6 +23,7 @@
           "timeout": "Délai d'attente (secondes)",
           "startup_cooldown": "Délai de démarrage (secondes)",
           "meter_type": "Type de compteur",
+          "meter_energy_consistency_tolerance": "Tolérance de cohérence énergétique du compteur",
           "delete_missing_inverters": "Supprimer les onduleurs manquants"
         }
       }

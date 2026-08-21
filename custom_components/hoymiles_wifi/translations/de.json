@@ -10,6 +10,7 @@
           "timeout": "Timeout (Sekunden)",
           "startup_cooldown": "Startverzögerung (Sekunden)",
           "meter_type": "Zählertyp",
+          "meter_energy_consistency_tolerance": "Toleranz für Zähler-Energiekonsistenz",
           "delete_missing_inverters": "Fehlende Wechselrichter löschen"
         }
       },
@@ -22,6 +23,7 @@
           "timeout": "Timeout (Sekunden)",
           "startup_cooldown": "Startverzögerung (Sekunden)",
           "meter_type": "Zählertyp",
+          "meter_energy_consistency_tolerance": "Toleranz für Zähler-Energiekonsistenz",
           "delete_missing_inverters": "Fehlende Wechselrichter löschen"
         }
       }

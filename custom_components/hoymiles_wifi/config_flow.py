@@ -17,6 +17,7 @@ from .const import (
     CONF_HYBRID_INVERTERS,
     CONF_INVERTERS,
     CONF_METERS,
+    CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
     CONF_METER_TYPE,
     CONF_PORTS,
     CONF_STARTUP_COOLDOWN,
@@ -26,6 +27,7 @@ from .const import (
     CONF_IS_ENCRYPTED,
     CONF_ENC_RAND,
     CONFIG_VERSION,
+    DEFAULT_METER_ENERGY_CONSISTENCY_TOLERANCE,
     DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_STARTUP_COOLDOWN_SECONDS,
     DEFAULT_UPDATE_INTERVAL_SECONDS,
@@ -35,6 +37,7 @@ from .const import (
     METER_TYPE_THREE_PHASE,
     MIN_UPDATE_INTERVAL_SECONDS,
     MIN_STARTUP_COOLDOWN_SECONDS,
+    MIN_METER_ENERGY_CONSISTENCY_TOLERANCE,
     MIN_TIMEOUT_SECONDS,
 )
 from .entity_migration import async_migrate_entity_unique_ids
@@ -71,6 +74,13 @@ DATA_SCHEMA = vol.Schema(
         ),
         vol.Optional(CONF_METER_TYPE, default=METER_TYPE_AUTO): vol.In(
             [METER_TYPE_AUTO, METER_TYPE_SINGLE_PHASE, METER_TYPE_THREE_PHASE]
+        ),
+        vol.Optional(
+            CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
+            default=DEFAULT_METER_ENERGY_CONSISTENCY_TOLERANCE,
+        ): vol.All(
+            vol.Coerce(int),
+            vol.Range(min=MIN_METER_ENERGY_CONSISTENCY_TOLERANCE),
         ),
     }
 )
@@ -315,6 +325,10 @@ async def _claim_detected_inverters(
         if not changed:
             continue
 
+        updated_data.setdefault(
+            CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
+            DEFAULT_METER_ENERGY_CONSISTENCY_TOLERANCE,
+        )
         hass.config_entries.async_update_entry(
             entry, data=updated_data, version=CONFIG_VERSION
         )
@@ -346,6 +360,10 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 CONF_STARTUP_COOLDOWN, DEFAULT_STARTUP_COOLDOWN_SECONDS
             )
             meter_type = user_input.get(CONF_METER_TYPE, METER_TYPE_AUTO)
+            meter_energy_consistency_tolerance = user_input.get(
+                CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
+                DEFAULT_METER_ENERGY_CONSISTENCY_TOLERANCE,
+            )
 
             try:
                 (
@@ -384,6 +402,9 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                         CONF_PORTS: ports,
                         CONF_METERS: meters,
                         CONF_METER_TYPE: meter_type,
+                        CONF_METER_ENERGY_CONSISTENCY_TOLERANCE: (
+                            meter_energy_consistency_tolerance
+                        ),
                         CONF_HYBRID_INVERTERS: hybrid_inverters,
                         CONF_IS_ENCRYPTED: is_encrypted,
                         CONF_ENC_RAND: enc_rand,
@@ -420,6 +441,13 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 ),
             )
             meter_type = user_input.get(CONF_METER_TYPE, METER_TYPE_AUTO)
+            meter_energy_consistency_tolerance = user_input.get(
+                CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
+                entry.data.get(
+                    CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
+                    DEFAULT_METER_ENERGY_CONSISTENCY_TOLERANCE,
+                ),
+            )
             delete_missing_inverters = user_input.get(
                 CONF_DELETE_MISSING_INVERTERS, False
             )
@@ -474,6 +502,9 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                     CONF_PORTS: ports,
                     CONF_METERS: meters,
                     CONF_METER_TYPE: meter_type,
+                    CONF_METER_ENERGY_CONSISTENCY_TOLERANCE: (
+                        meter_energy_consistency_tolerance
+                    ),
                     CONF_HYBRID_INVERTERS: hybrid_inverters,
                     CONF_IS_ENCRYPTED: is_encrypted,
                     CONF_ENC_RAND: enc_rand,
@@ -535,6 +566,16 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                             METER_TYPE_SINGLE_PHASE,
                             METER_TYPE_THREE_PHASE,
                         ]
+                    ),
+                    vol.Optional(
+                        CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
+                        default=entry.data.get(
+                            CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
+                            DEFAULT_METER_ENERGY_CONSISTENCY_TOLERANCE,
+                        ),
+                    ): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(min=MIN_METER_ENERGY_CONSISTENCY_TOLERANCE),
                     ),
                     vol.Optional(
                         CONF_DELETE_MISSING_INVERTERS,

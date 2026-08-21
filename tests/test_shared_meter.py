@@ -5,7 +5,10 @@ from types import SimpleNamespace
 from homeassistant.const import CONF_HOST
 from hoymiles_wifi.protobuf import RealDataNew_pb2
 
-from custom_components.hoymiles_wifi.const import CONF_DTU_SERIAL_NUMBER
+from custom_components.hoymiles_wifi.const import (
+    CONF_DTU_SERIAL_NUMBER,
+    CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
+)
 from custom_components.hoymiles_wifi.sensor import (
     HoymilesSensorEntityDescription,
     HoymilesSharedMeterDataSensorEntity,
@@ -42,11 +45,21 @@ BAD_247_METER_ENERGY_FIELDS = {
 }
 
 
-def _config_entry(entry_id: str, host: str, dtu_serial_number: str = "4121a01953c8"):
+def _config_entry(
+    entry_id: str,
+    host: str,
+    dtu_serial_number: str = "4121a01953c8",
+    meter_energy_consistency_tolerance: int | None = None,
+):
     """Build minimal config entry data for shared meter tests."""
+    data = {CONF_HOST: host, CONF_DTU_SERIAL_NUMBER: dtu_serial_number}
+    if meter_energy_consistency_tolerance is not None:
+        data[CONF_METER_ENERGY_CONSISTENCY_TOLERANCE] = (
+            meter_energy_consistency_tolerance
+        )
     return SimpleNamespace(
         entry_id=entry_id,
-        data={CONF_HOST: host, CONF_DTU_SERIAL_NUMBER: dtu_serial_number},
+        data=data,
     )
 
 
@@ -174,6 +187,54 @@ def test_inconsistent_energy_total_rejects_first_meter_sample(hass):
     coordinator.update_from_real_data(
         _real_data("4121A0194E49", 100, **BAD_247_METER_ENERGY_FIELDS),
         bad_entry,
+    )
+
+    assert METER_SERIAL_NUMBER not in coordinator.data
+
+
+def test_small_energy_total_mismatch_is_accepted_by_default(hass):
+    """Test small meter total-vs-phase drift is accepted."""
+    coordinator = HoymilesSharedMeterCoordinator(hass)
+    entry = _config_entry("entry-a", "192.168.10.250")
+
+    coordinator.update_from_real_data(
+        _real_data(
+            "4121A01953C8",
+            100,
+            energy_total_consumed=1567500,
+            energy_phase_A_consumed=704306,
+            energy_phase_B_consumed=410489,
+            energy_phase_C_consumed=452000,
+            phase_total_power=-250,
+        ),
+        entry,
+    )
+
+    record = _meter_record(coordinator)
+    assert record["values"]["energy_total_consumed"] == 1567500
+    assert record["values"]["phase_total_power"] == -250
+
+
+def test_configured_energy_consistency_tolerance_rejects_larger_mismatch(hass):
+    """Test the configured consistency tolerance controls rejection."""
+    coordinator = HoymilesSharedMeterCoordinator(hass)
+    entry = _config_entry(
+        "entry-a",
+        "192.168.10.250",
+        meter_energy_consistency_tolerance=10,
+    )
+
+    coordinator.update_from_real_data(
+        _real_data(
+            "4121A01953C8",
+            100,
+            energy_total_consumed=1567500,
+            energy_phase_A_consumed=704306,
+            energy_phase_B_consumed=410489,
+            energy_phase_C_consumed=452000,
+            phase_total_power=-250,
+        ),
+        entry,
     )
 
     assert METER_SERIAL_NUMBER not in coordinator.data

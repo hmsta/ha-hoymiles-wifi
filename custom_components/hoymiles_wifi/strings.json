@@ -10,6 +10,7 @@
           "timeout": "Timeout (seconds)",
           "startup_cooldown": "Startup cooldown (seconds)",
           "meter_type": "Meter type",
+          "meter_energy_consistency_tolerance": "Meter energy consistency tolerance",
           "delete_missing_inverters": "Delete missing inverters"
         }
       },
@@ -22,6 +23,7 @@
           "timeout": "Timeout (seconds)",
           "startup_cooldown": "Startup cooldown (seconds)",
           "meter_type": "Meter type",
+          "meter_energy_consistency_tolerance": "Meter energy consistency tolerance",
           "delete_missing_inverters": "Delete missing inverters"
         }
       }
