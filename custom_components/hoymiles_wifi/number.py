@@ -135,7 +135,7 @@ class HoymilesNumberEntity(HoymilesCoordinatorEntity, NumberEntity):
         """
         if self._set_action == SetAction.POWER_LIMIT:
             dtu = self.coordinator.get_dtu()
-            if value < 0 and value > 100:
+            if value < 0 or value > 100:
                 _LOGGER.error("Power limit value out of range")
                 return
             await dtu.async_set_power_limit(value)
