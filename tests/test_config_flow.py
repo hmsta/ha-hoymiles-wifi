@@ -638,6 +638,76 @@ async def test_reconfigure_moves_swapped_inverters_between_dtus(
     assert mock_reload.await_count == 4
 
 
+async def test_reconfigure_does_not_remove_old_owner_when_current_reload_fails(
+    hass: HomeAssistant,
+) -> None:
+    """Test old DTU keeps claimed inverter if the current DTU reload fails."""
+    entry_a = _add_config_entry(
+        hass,
+        entry_id="dtu-a",
+        dtu_serial_number=DTU_TEST_SERIAL_NUMBER,
+        single_phase_inverters=[INVERTER_A_SERIAL_NUMBER],
+        ports=[
+            {
+                "inverter_serial_number": INVERTER_A_SERIAL_NUMBER,
+                "port_number": 1,
+            }
+        ],
+    )
+    entry_b = _add_config_entry(
+        hass,
+        entry_id="dtu-b",
+        dtu_serial_number=DTU_SECOND_TEST_SERIAL_NUMBER,
+        single_phase_inverters=[INVERTER_B_SERIAL_NUMBER],
+    )
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "entry_id": entry_b.entry_id,
+        },
+    )
+    with (
+        patch(
+            "custom_components.hoymiles_wifi.config_flow.async_get_config_entry_data_for_host",
+            new=AsyncMock(
+                return_value=_discovered_config_data(
+                    dtu_serial_number=DTU_SECOND_TEST_SERIAL_NUMBER,
+                    single_phase_inverters=[INVERTER_A_SERIAL_NUMBER],
+                    ports=[
+                        {
+                            "inverter_serial_number": INVERTER_A_SERIAL_NUMBER,
+                            "port_number": 1,
+                        }
+                    ],
+                )
+            ),
+        ),
+        patch.object(
+            hass.config_entries,
+            "async_reload",
+            new=AsyncMock(return_value=False),
+        ) as mock_reload,
+    ):
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            MOCK_DATA_STEP,
+        )
+
+    assert result2["type"] == FlowResultType.FORM
+    assert result2["errors"] == {"base": "unknown"}
+    assert entry_a.data[CONF_INVERTERS] == [INVERTER_A_SERIAL_NUMBER]
+    assert entry_a.data[CONF_PORTS] == [
+        {
+            "inverter_serial_number": INVERTER_A_SERIAL_NUMBER,
+            "port_number": 1,
+        }
+    ]
+    assert mock_reload.await_count == 1
+    mock_reload.assert_awaited_once_with(entry_b.entry_id)
+
+
 @pytest.mark.parametrize(
     ("raise_error", "text_error"),
     [

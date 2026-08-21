@@ -300,21 +300,22 @@ def _remove_claimed_inverters_from_data(
     return updated_data, changed
 
 
-async def _claim_detected_inverters(
+def _claimed_inverter_entry_updates(
     hass: HomeAssistant,
     single_phase_inverters: list,
     three_phase_inverters: list,
     ports: list[dict],
     hybrid_inverters: list[dict],
     current_entry_id: str | None = None,
-) -> None:
-    """Move detected inverters from other Hoymiles entries to this DTU."""
+) -> list[tuple[ConfigEntry, dict]]:
+    """Return config entry updates needed to remove claimed inverters."""
     claimed_inverter_serials = _detected_inverter_serials(
         single_phase_inverters, three_phase_inverters, ports, hybrid_inverters
     )
     if not claimed_inverter_serials:
-        return
+        return []
 
+    updates = []
     for entry in hass.config_entries.async_entries(DOMAIN):
         if entry.entry_id == current_entry_id:
             continue
@@ -329,6 +330,16 @@ async def _claim_detected_inverters(
             CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
             DEFAULT_METER_ENERGY_CONSISTENCY_TOLERANCE,
         )
+        updates.append((entry, updated_data))
+
+    return updates
+
+
+async def _apply_claimed_inverter_entry_updates(
+    hass: HomeAssistant, entry_updates: list[tuple[ConfigEntry, dict]]
+) -> None:
+    """Apply planned config entry updates for moved inverter ownership."""
+    for entry, updated_data in entry_updates:
         hass.config_entries.async_update_entry(
             entry, data=updated_data, version=CONFIG_VERSION
         )
@@ -337,6 +348,28 @@ async def _claim_detected_inverters(
                 "Failed to reload Hoymiles entry %s after moving inverter ownership",
                 entry.entry_id,
             )
+
+
+async def _claim_detected_inverters(
+    hass: HomeAssistant,
+    single_phase_inverters: list,
+    three_phase_inverters: list,
+    ports: list[dict],
+    hybrid_inverters: list[dict],
+    current_entry_id: str | None = None,
+) -> None:
+    """Move detected inverters from other Hoymiles entries to this DTU."""
+    await _apply_claimed_inverter_entry_updates(
+        hass,
+        _claimed_inverter_entry_updates(
+            hass,
+            single_phase_inverters,
+            three_phase_inverters,
+            ports,
+            hybrid_inverters,
+            current_entry_id,
+        ),
+    )
 
 
 class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
@@ -471,7 +504,7 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 if dtu_sn != entry.unique_id:
                     return self.async_abort(reason="another_device")
                 meters = _filter_duplicate_meters(self.hass, meters, entry.entry_id)
-                await _claim_detected_inverters(
+                claimed_inverter_entry_updates = _claimed_inverter_entry_updates(
                     self.hass,
                     single_phase_inverters,
                     three_phase_inverters,
@@ -520,6 +553,9 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 if not result:
                     errors["base"] = "unknown"
                 else:
+                    await _apply_claimed_inverter_entry_updates(
+                        self.hass, claimed_inverter_entry_updates
+                    )
                     return self.async_abort(reason="reconfigure_successful")
 
         return self.async_show_form(
