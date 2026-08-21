@@ -392,8 +392,9 @@ async def async_remove_config_entry_device(
         if shared_meter_coordinator is not None:
             for meter_serial in meter_serials:
                 shared_meter_coordinator.remove_meter(meter_serial)
+        return True
 
-    return True
+    return False
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
