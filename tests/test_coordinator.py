@@ -1,5 +1,6 @@
 """Unit tests for Hoymiles coordinator scheduling helpers."""
 
+import inspect
 from types import SimpleNamespace
 
 from homeassistant.const import CONF_HOST
@@ -12,6 +13,7 @@ from custom_components.hoymiles_wifi.const import (
     DOMAIN,
 )
 from custom_components.hoymiles_wifi.coordinator import (
+    HoymilesRealDataUpdateCoordinator,
     _next_staggered_refresh_time,
     _stagger_slot_for_entries,
     _uses_real_data_coordinator,
@@ -114,6 +116,40 @@ def test_next_staggered_refresh_uses_startup_epoch_and_slot() -> None:
     assert _next_staggered_refresh_time(1121.0, 1120.0, 300.0, 75.0) == 1195.0
     assert _next_staggered_refresh_time(1495.0, 1120.0, 300.0, 75.0) == 1495.0
     assert _next_staggered_refresh_time(1496.0, 1120.0, 300.0, 75.0) == 1496.0
+
+
+def test_real_data_scheduler_does_not_call_private_ha_refresh_wrapper() -> None:
+    """Test staggered refresh scheduling avoids HA private coordinator helpers."""
+    source = inspect.getsource(HoymilesRealDataUpdateCoordinator._schedule_refresh)
+
+    assert "__wrap_handle_refresh_interval" not in source
+    assert "_handle_staggered_refresh_interval" in source
+
+
+def test_staggered_refresh_handler_requests_public_refresh_task() -> None:
+    """Test scheduled refreshes are dispatched through async_request_refresh."""
+
+    class FakeHass:
+        def __init__(self) -> None:
+            self.created_tasks = []
+
+        def async_create_task(self, coroutine):
+            self.created_tasks.append(coroutine)
+            coroutine.close()
+
+    async def refresh():
+        return None
+
+    coordinator = SimpleNamespace(
+        hass=FakeHass(),
+        _unsub_refresh=lambda: None,
+        async_request_refresh=refresh,
+    )
+
+    HoymilesRealDataUpdateCoordinator._handle_staggered_refresh_interval(coordinator)
+
+    assert coordinator._unsub_refresh is None
+    assert len(coordinator.hass.created_tasks) == 1
 
 
 def test_sensor_reports_unknown_before_first_real_data_refresh() -> None:

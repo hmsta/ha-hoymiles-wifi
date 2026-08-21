@@ -198,8 +198,14 @@ class HoymilesRealDataUpdateCoordinator(HoymilesDataUpdateCoordinator):
         )
         self._unsub_refresh = loop.call_at(
             next_refresh,
-            self._DataUpdateCoordinator__wrap_handle_refresh_interval,
+            self._handle_staggered_refresh_interval,
         ).cancel
+
+    @callback
+    def _handle_staggered_refresh_interval(self) -> None:
+        """Request a scheduled refresh without relying on HA private helpers."""
+        self._unsub_refresh = None
+        self.hass.async_create_task(self.async_request_refresh())
 
     @callback
     def schedule_startup_refresh(self) -> None:
