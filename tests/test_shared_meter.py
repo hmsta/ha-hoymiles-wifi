@@ -324,6 +324,51 @@ def test_instantaneous_power_uses_newest_dtu_sample(hass):
     assert record["last_source_timestamp"] == 101
 
 
+def test_invalid_instantaneous_power_rejects_first_meter_sample(hass):
+    """Test absurd instantaneous meter power cannot seed the meter."""
+    coordinator = HoymilesSharedMeterCoordinator(hass)
+    entry = _config_entry("entry-a", "192.168.10.250")
+
+    coordinator.update_from_real_data(
+        _real_data("4121a01953c8", 100, phase_C_power=21_474_836),
+        entry,
+    )
+
+    assert METER_SERIAL_NUMBER not in coordinator.data
+
+
+def test_invalid_instantaneous_power_rejects_entire_meter_sample(hass):
+    """Test absurd instantaneous power does not overwrite any shared values."""
+    coordinator = HoymilesSharedMeterCoordinator(hass)
+    good_entry = _config_entry("entry-good", "192.168.10.250")
+    bad_entry = _config_entry("entry-bad", "192.168.10.247")
+
+    coordinator.update_from_real_data(
+        _real_data(
+            "4121A01953C8",
+            100,
+            phase_C_power=-615,
+            energy_total_consumed=1_610_765,
+        ),
+        good_entry,
+    )
+    coordinator.update_from_real_data(
+        _real_data(
+            "4121A0194E49",
+            101,
+            phase_C_power=-21_474_836,
+            energy_total_consumed=1_611_000,
+        ),
+        bad_entry,
+    )
+
+    record = _meter_record(coordinator)
+    assert record["values"]["phase_C_power"] == -615
+    assert record["values"]["energy_total_consumed"] == 1_610_765
+    assert record["last_source_dtu"] == "4121A01953C8"
+    assert record["last_energy_source_dtu"] == "4121A01953C8"
+
+
 def test_shared_meter_data_sensor_reads_shared_store(hass):
     """Test meter sensors read from the shared meter coordinator."""
     coordinator = HoymilesSharedMeterCoordinator(hass)

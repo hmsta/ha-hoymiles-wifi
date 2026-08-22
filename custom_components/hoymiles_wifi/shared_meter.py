@@ -46,6 +46,28 @@ ENERGY_CONSISTENCY_GROUPS = (
 
 IGNORED_METER_FIELDS = {"serial_number"}
 
+INSTANTANEOUS_FIELD_LIMITS = {
+    # Raw power values are converted with *10 before HA displays them.
+    # 200 kW is intentionally generous for this integration and still catches
+    # corrupt int32/sentinel samples such as +/-214,748,360 W.
+    "phase_total_power": (-20_000, 20_000),
+    "phase_A_power": (-20_000, 20_000),
+    "phase_B_power": (-20_000, 20_000),
+    "phase_C_power": (-20_000, 20_000),
+    # Raw voltages/currents are converted with *0.01.
+    "voltage_phase_A": (0, 30_000),
+    "voltage_phase_B": (0, 30_000),
+    "voltage_phase_C": (0, 30_000),
+    "current_phase_A": (0, 50_000),
+    "current_phase_B": (0, 50_000),
+    "current_phase_C": (0, 50_000),
+    # Raw power factors are converted with *0.1.
+    "power_factor_total": (-1_000, 1_000),
+    "power_factor_phase_A": (-1_000, 1_000),
+    "power_factor_phase_B": (-1_000, 1_000),
+    "power_factor_phase_C": (-1_000, 1_000),
+}
+
 
 class HoymilesSharedMeterCoordinator(DataUpdateCoordinator):
     """Merge meter data reported by multiple DTUs."""
@@ -83,7 +105,12 @@ class HoymilesSharedMeterCoordinator(DataUpdateCoordinator):
             existing_values = existing_record.get("values", {})
             present_fields = {field.name for field, _value in meter_data.ListFields()}
 
-            if self._sample_has_inconsistent_energy(
+            if self._sample_has_invalid_instantaneous_values(
+                meter_data,
+                meter_serial,
+                dtu_serial,
+                present_fields,
+            ) or self._sample_has_inconsistent_energy(
                 meter_data,
                 meter_serial,
                 dtu_serial,
@@ -217,6 +244,35 @@ class HoymilesSharedMeterCoordinator(DataUpdateCoordinator):
                     previous,
                 )
                 return True
+
+        return False
+
+    @staticmethod
+    def _sample_has_invalid_instantaneous_values(
+        meter_data: Any,
+        meter_serial: str,
+        dtu_serial: str,
+        present_fields: set[str],
+    ) -> bool:
+        """Return true if any present instantaneous meter value is implausible."""
+        for field_name, (minimum, maximum) in INSTANTANEOUS_FIELD_LIMITS.items():
+            if field_name not in present_fields:
+                continue
+
+            value = getattr(meter_data, field_name)
+            if minimum <= value <= maximum:
+                continue
+
+            _LOGGER.debug(
+                "Ignoring invalid meter sample for meter %s from DTU %s because %s=%s is outside %s..%s",
+                meter_serial,
+                dtu_serial,
+                field_name,
+                value,
+                minimum,
+                maximum,
+            )
+            return True
 
         return False
 
