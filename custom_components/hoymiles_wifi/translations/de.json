@@ -417,6 +417,9 @@
       },
       "enable_performance_data_mode": {
         "name": "Experimentell: Leistungsdatenmodus aktivieren"
+      },
+      "force_update": {
+        "name": "Update erzwingen"
       }
     }
   },

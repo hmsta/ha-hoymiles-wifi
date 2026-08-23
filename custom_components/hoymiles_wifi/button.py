@@ -11,6 +11,7 @@ from homeassistant.components.button import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from hoymiles_wifi.dtu import DTU
 
@@ -19,8 +20,10 @@ from .const import (
     CONF_INVERTERS,
     CONF_THREE_PHASE_INVERTERS,
     DOMAIN,
+    HASS_DATA_COORDINATOR,
     HASS_DTU,
 )
+from .coordinator import HoymilesDataUpdateCoordinator
 from .entity import HoymilesEntity, HoymilesEntityDescription
 
 
@@ -31,6 +34,7 @@ class HoymilesButtonEntityDescription(
     """Class to describe a Hoymiles Button entity."""
 
     action: str = ""
+    force_data_update: bool = False
 
 
 BUTTONS: tuple[HoymilesButtonEntityDescription, ...] = (
@@ -65,6 +69,13 @@ BUTTONS: tuple[HoymilesButtonEntityDescription, ...] = (
         is_dtu_sensor=True,
         action="async_enable_performance_data_mode",
     ),
+    HoymilesButtonEntityDescription(
+        key="force_update",
+        translation_key="force_update",
+        icon="mdi:refresh",
+        is_dtu_sensor=True,
+        force_data_update=True,
+    ),
 )
 
 
@@ -76,32 +87,39 @@ async def async_setup_entry(
     """Set up the Hoymiles number entities."""
     hass_data = hass.data[DOMAIN][config_entry.entry_id]
     dtu = hass_data[HASS_DTU]
+    data_coordinator = hass_data.get(HASS_DATA_COORDINATOR)
     dtu_serial_number = config_entry.data[CONF_DTU_SERIAL_NUMBER]
     single_phase_inverters = config_entry.data.get(CONF_INVERTERS, [])
     three_phase_inverters = config_entry.data.get(CONF_THREE_PHASE_INVERTERS, [])
     inverters = single_phase_inverters + three_phase_inverters
 
-    if inverters:
-        buttons = []
-        for description in BUTTONS:
-            if description.is_dtu_sensor is True:
+    buttons = []
+    for description in BUTTONS:
+        if description.is_dtu_sensor is True:
+            if not inverters and not description.force_data_update:
+                continue
+            if description.force_data_update and data_coordinator is None:
+                continue
+
+            updated_description = dataclasses.replace(
+                description, serial_number=dtu_serial_number
+            )
+            buttons.append(
+                HoymilesButtonEntity(
+                    config_entry, updated_description, dtu, data_coordinator
+                )
+            )
+        else:
+            for inverter_serial in inverters:
+                new_key = description.key.replace("<inverter_serial>", inverter_serial)
                 updated_description = dataclasses.replace(
-                    description, serial_number=dtu_serial_number
+                    description, key=new_key, serial_number=inverter_serial
                 )
                 buttons.append(
                     HoymilesButtonEntity(config_entry, updated_description, dtu)
                 )
-            else:
-                for inverter_serial in inverters:
-                    new_key = description.key.replace(
-                        "<inverter_serial>", inverter_serial
-                    )
-                    updated_description = dataclasses.replace(
-                        description, key=new_key, serial_number=inverter_serial
-                    )
-                    buttons.append(
-                        HoymilesButtonEntity(config_entry, updated_description, dtu)
-                    )
+
+    if buttons:
         async_add_entities(buttons)
 
 
@@ -113,13 +131,21 @@ class HoymilesButtonEntity(HoymilesEntity, ButtonEntity):
         config_entry: ConfigEntry,
         description: HoymilesButtonEntityDescription,
         dtu: DTU,
+        data_coordinator: HoymilesDataUpdateCoordinator | None = None,
     ) -> None:
         """Initialize the HoymilesButtonEntity."""
         super().__init__(config_entry, description)
         self._dtu = dtu
+        self._data_coordinator = data_coordinator
 
     async def async_press(self) -> None:
         """Press the button."""
+
+        if self.entity_description.force_data_update:
+            if self._data_coordinator is None:
+                raise HomeAssistantError("No real-data coordinator is available")
+            await self._data_coordinator.async_request_refresh()
+            return
 
         if hasattr(self._dtu, self.entity_description.action) and callable(
             getattr(self._dtu, self.entity_description.action)

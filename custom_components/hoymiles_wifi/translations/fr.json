@@ -417,6 +417,9 @@
       },
       "enable_performance_data_mode": {
         "name": "Expérimental: Activer le mode de données de performance"
+      },
+      "force_update": {
+        "name": "Forcer la mise à jour"
       }
     }
   },
