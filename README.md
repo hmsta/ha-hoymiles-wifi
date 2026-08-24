@@ -70,8 +70,8 @@ Existing Home Assistant device and entity registry entries may keep their curren
 
 The Reconfigure flow can store optional site metadata:
 
-- `layout_json`: the Hoymiles cloud `v3_g_c` layout JSON.
 - `dtu_location`: a text location for the DTU config entry.
+- `inverter_location_map`: one `serial=location` line per inverter.
 - `inverter_phase_map`: one `serial=phase` line per inverter. Phases `1`, `2`, `3`, `L1`, `L2`, and `L3` are accepted.
 
 When metadata is configured, the integration creates diagnostic sensors attached to the existing Hoymiles devices:
@@ -80,7 +80,9 @@ When metadata is configured, the integration creates diagnostic sensors attached
 - `sensor.inverter_<serial>_phase`
 - `sensor.dtu_<serial>_location`
 
-Inverter locations are derived from Hoymiles layout group names. Row suffixes are stripped, so groups like `53-a` and `53-b` both become location `53`. Empty metadata fields do not create metadata entities.
+Serial numbers are normalized to lowercase. On Reconfigure, metadata lines for serials that do not belong to the current DTU entry are ignored, and only compact per-DTU dictionaries are stored. Empty metadata fields do not create metadata entities.
+
+The Lovelace layout map loads the full Hoymiles JSON directly in the browser via `layout_url`; the backend does not store the large layout JSON.
 
 ### Noisy Diagnostics Disabled by Default
 
@@ -211,11 +213,19 @@ Configuration is done in the UI.
 
 ### Optional Reconfigure Metadata
 
-After the DTU is configured, use Reconfigure to add optional metadata used by the layout map and table cards:
+After the DTU is configured, use Reconfigure to add optional metadata used by the table cards and diagnostic entities:
 
-- `Hoymiles layout JSON`: paste the full Hoymiles cloud `v3_g_c` layout JSON.
 - `DTU location`: a short location label for this DTU.
+- `Inverter location map`: one inverter location mapping per line.
 - `Inverter phase map`: one inverter phase mapping per line.
+
+Location map example:
+
+```text
+1421a01a4ff5=53
+1421a01a5294=54
+1421a01a53da=77
+```
 
 Phase map example:
 
@@ -225,7 +235,7 @@ Phase map example:
 1421a01a53da=3
 ```
 
-Serial numbers are normalized to lowercase. Reconfiguring with an empty metadata field removes the corresponding generated metadata entities after reload.
+Serial numbers are normalized to lowercase. Unknown serials are ignored for the current DTU, so the same source list can be pasted into several DTU entries if needed. Reconfiguring with an empty metadata field removes the corresponding generated metadata entities after reload.
 
 ## Hoymiles Layout Card
 
@@ -243,10 +253,18 @@ url: /hoymiles_wifi_static/hoymiles-table-cards.js
 type: module
 ```
 
-The preferred setup is to store `layout_json` in the integration Reconfigure flow, then use a compact card config:
+Bundled card JavaScript stays inside the integration and is served from `/hoymiles_wifi_static/...`. User-managed layout assets should go under `/config/www`, for example:
+
+```text
+/config/www/hoymiles_wifi/hoymiles-layout.json
+/config/www/hoymiles_wifi/hoymiles-map.jpg
+```
+
+The layout JSON should reference the image as `/local/hoymiles_wifi/hoymiles-map.jpg`. Then configure the card with `layout_url`:
 
 ```yaml
 type: custom:hoymiles-layout-card
+layout_url: /local/hoymiles_wifi/hoymiles-layout.json
 max_watts: 300
 off_threshold_watts: 1
 height: 80vh
@@ -262,14 +280,7 @@ rssi_ok_dbm: -75
 rssi_bad_dbm: -90
 ```
 
-If you have more than one Hoymiles config entry with stored layout JSON, add `entry_id` to select the entry:
-
-```yaml
-type: custom:hoymiles-layout-card
-entry_id: your_config_entry_id
-```
-
-For debugging or one-off layouts, a pasted `layout:` value is still supported and takes precedence over the stored Reconfigure layout.
+Any `/local/...` path works, including `/local/community/hoymiles_wifi/...`, but `/local/hoymiles_wifi/...` keeps user-managed files separate from HACS-managed frontend folders. `background_url` is not needed because the card uses the background image URL inside the Hoymiles layout JSON. For debugging or one-off layouts, a pasted `layout:` value is still supported and takes precedence over `layout_url`.
 
 The card does not expose one selector per panel. It reads the panel positions from the Hoymiles JSON and automatically matches integration entities named like:
 

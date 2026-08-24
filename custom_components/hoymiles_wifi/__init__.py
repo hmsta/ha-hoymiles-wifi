@@ -4,16 +4,18 @@ from datetime import timedelta
 import inspect
 import logging
 from pathlib import Path
+from typing import Any
 import voluptuous as vol
 
-from homeassistant.components import websocket_api
+from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_ID, CONF_TYPE, CONF_URL, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntry
-from homeassistant.helpers.typing import ConfigType
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.service import SupportsResponse
+from homeassistant.helpers.typing import ConfigType
 from hoymiles_wifi.dtu import DTU
 
 from .const import (
@@ -21,7 +23,9 @@ from .const import (
     CONF_DTU_SERIAL_NUMBER,
     CONF_HYBRID_INVERTERS,
     CONF_INVERTERS,
+    CONF_INVERTER_LOCATIONS,
     CONF_INVERTER_PHASE_MAP,
+    CONF_INVERTER_PHASES,
     CONF_LAYOUT_JSON,
     CONF_METERS,
     CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
@@ -55,8 +59,11 @@ from .coordinator import (
 from .entity_migration import async_migrate_entity_unique_ids
 from .layout_metadata import (
     LayoutMetadataError,
+    PhaseMapError,
     derive_inverter_locations,
-    parse_layout_json,
+    normalize_metadata_value,
+    normalize_serial,
+    parse_inverter_phase_map,
 )
 from .services import async_handle_set_bms_mode
 from .shared_meter import HoymilesSharedMeterCoordinator
@@ -103,7 +110,6 @@ SET_BMS_SCHEMA = vol.Schema(
 async def async_setup(hass: HomeAssistant, config: ConfigType):
     """Set up this integration using YAML is not supported."""
     await _async_register_frontend(hass)
-    _async_register_layout_websocket(hass)
     return True
 
 
@@ -281,79 +287,103 @@ def _resource_type(item: dict) -> str | None:
     return item.get(CONF_TYPE) or item.get(LOVELACE_RESOURCE_TYPE)
 
 
-def _async_register_layout_websocket(hass: HomeAssistant) -> None:
-    """Register the websocket command used by the layout card."""
-    hass.data.setdefault(DOMAIN, {})
-    if hass.data[DOMAIN].get("layout_websocket_registered"):
-        return
-
-    websocket_api.async_register_command(hass, _websocket_get_layout)
-    hass.data[DOMAIN]["layout_websocket_registered"] = True
+def _metadata_unique_id(entry_id: str, serial_number: str, kind: str) -> str:
+    """Return the generated unique ID for a static metadata sensor."""
+    return f"hoymiles_{entry_id}_{normalize_serial(serial_number)}_metadata.{kind}"
 
 
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/layout",
-        vol.Optional("entry_id"): str,
-    }
-)
-@websocket_api.async_response
-async def _websocket_get_layout(hass: HomeAssistant, connection, msg):
-    """Return the stored Hoymiles layout JSON for a config entry."""
-    entry_id = msg.get("entry_id")
-    entry = _layout_config_entry(hass, entry_id)
-    if entry is None:
-        connection.send_error(
-            msg["id"],
-            "not_found",
-            "No Hoymiles config entry with stored layout JSON was found",
-        )
-        return
-
-    layout_json = entry.data.get(CONF_LAYOUT_JSON, "")
-    try:
-        layout = parse_layout_json(layout_json)
-        locations = derive_inverter_locations(layout_json)
-    except LayoutMetadataError as err:
-        connection.send_error(msg["id"], "invalid_layout_json", str(err))
-        return
-
-    connection.send_result(
-        msg["id"],
-        {
-            "entry_id": entry.entry_id,
-            "layout": layout,
-            "locations": locations,
-        },
+def _configured_inverter_serials(data: dict[str, Any]) -> set[str]:
+    """Return all configured inverter serials in lower-case form."""
+    serials = {normalize_serial(serial) for serial in data.get(CONF_INVERTERS, [])}
+    serials.update(
+        normalize_serial(serial) for serial in data.get(CONF_THREE_PHASE_INVERTERS, [])
     )
+    serials.update(
+        normalize_serial(port.get("inverter_serial_number"))
+        for port in data.get(CONF_PORTS, [])
+        if isinstance(port, dict)
+    )
+    serials.update(
+        normalize_serial(inverter.get("inverter_serial_number"))
+        for inverter in data.get(CONF_HYBRID_INVERTERS, [])
+        if isinstance(inverter, dict)
+    )
+    return {serial for serial in serials if serial}
 
 
-def _layout_config_entry(hass: HomeAssistant, entry_id: str | None):
-    """Return the config entry to use for stored layout websocket requests."""
-    entries = hass.config_entries.async_entries(DOMAIN)
-    if entry_id:
-        return next(
-            (
-                entry
-                for entry in entries
-                if entry.entry_id == entry_id and entry.data.get(CONF_LAYOUT_JSON)
-            ),
-            None,
+def _stored_metadata_unique_ids(entry_id: str, data: dict[str, Any]) -> set[str]:
+    """Return metadata entity unique IDs backed by structured metadata storage."""
+    unique_ids: set[str] = set()
+    inverter_serials = _configured_inverter_serials(data)
+
+    locations = data.get(CONF_INVERTER_LOCATIONS)
+    if not isinstance(locations, dict):
+        locations = {}
+    locations = {
+        normalize_serial(serial): normalize_metadata_value(value)
+        for serial, value in locations.items()
+        if normalize_serial(serial) and normalize_metadata_value(value)
+    }
+    phases = data.get(CONF_INVERTER_PHASES)
+    if not isinstance(phases, dict):
+        phases = {}
+    phases = {
+        normalize_serial(serial): normalize_metadata_value(value)
+        for serial, value in phases.items()
+        if normalize_serial(serial) and normalize_metadata_value(value)
+    }
+
+    for serial in inverter_serials:
+        if locations.get(serial):
+            unique_ids.add(_metadata_unique_id(entry_id, serial, "location"))
+        if phases.get(serial):
+            unique_ids.add(_metadata_unique_id(entry_id, serial, "phase"))
+
+    return unique_ids
+
+
+def _legacy_metadata_unique_ids(entry_id: str, data: dict[str, Any]) -> set[str]:
+    """Return metadata unique IDs generated from removed legacy config keys."""
+    unique_ids: set[str] = set()
+    inverter_serials = _configured_inverter_serials(data)
+
+    try:
+        locations = derive_inverter_locations(data.get(CONF_LAYOUT_JSON))
+    except LayoutMetadataError:
+        locations = {}
+    try:
+        phases = parse_inverter_phase_map(data.get(CONF_INVERTER_PHASE_MAP))
+    except PhaseMapError:
+        phases = {}
+
+    for serial in inverter_serials:
+        if locations.get(serial):
+            unique_ids.add(_metadata_unique_id(entry_id, serial, "location"))
+        if phases.get(serial):
+            unique_ids.add(_metadata_unique_id(entry_id, serial, "phase"))
+
+    return unique_ids
+
+
+def _remove_metadata_entities_by_unique_id(
+    hass: HomeAssistant, unique_ids: set[str]
+) -> None:
+    """Remove generated metadata registry entries by unique ID."""
+    if not unique_ids:
+        return
+    entity_registry = er.async_get(hass)
+    for unique_id in unique_ids:
+        entity_id = entity_registry.async_get_entity_id(
+            SENSOR_DOMAIN, DOMAIN, unique_id
         )
-
-    entries_with_layout = [
-        entry for entry in entries if entry.data.get(CONF_LAYOUT_JSON)
-    ]
-    if len(entries_with_layout) == 1:
-        return entries_with_layout[0]
-    return None
+        if entity_id:
+            entity_registry.async_remove(entity_id)
 
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     """Set up this integration using UI."""
 
     await _async_register_frontend(hass)
-    _async_register_layout_websocket(hass)
 
     hass.data.setdefault(DOMAIN, {})
     shared_meter_coordinator = hass.data[DOMAIN].get(HASS_SHARED_METER_COORDINATOR)
@@ -505,6 +535,9 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
             "Migrating entry %s to version %s", config_entry.entry_id, CONFIG_VERSION
         )
         new = {**config_entry.data}
+        legacy_metadata_unique_ids = _legacy_metadata_unique_ids(
+            config_entry.entry_id, new
+        )
 
         new.setdefault(CONF_THREE_PHASE_INVERTERS, [])
         new.setdefault(CONF_HYBRID_INVERTERS, [])
@@ -518,9 +551,16 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         )
         new.setdefault(CONF_IS_ENCRYPTED, False)
         new.setdefault(CONF_ENC_RAND, None)
-        new.setdefault(CONF_LAYOUT_JSON, "")
         new.setdefault(CONF_DTU_LOCATION, "")
-        new.setdefault(CONF_INVERTER_PHASE_MAP, "")
+        new.setdefault(CONF_INVERTER_LOCATIONS, {})
+        new.setdefault(CONF_INVERTER_PHASES, {})
+        new.pop(CONF_LAYOUT_JSON, None)
+        new.pop(CONF_INVERTER_PHASE_MAP, None)
+        _remove_metadata_entities_by_unique_id(
+            hass,
+            legacy_metadata_unique_ids
+            - _stored_metadata_unique_ids(config_entry.entry_id, new),
+        )
 
         await async_migrate_entity_unique_ids(hass, config_entry.entry_id, new)
 

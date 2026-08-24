@@ -5,8 +5,8 @@ from types import SimpleNamespace
 from custom_components.hoymiles_wifi.const import (
     CONF_DTU_LOCATION,
     CONF_DTU_SERIAL_NUMBER,
-    CONF_INVERTER_PHASE_MAP,
-    CONF_LAYOUT_JSON,
+    CONF_INVERTER_LOCATIONS,
+    CONF_INVERTER_PHASES,
     DOMAIN,
 )
 from custom_components.hoymiles_wifi.sensor import _metadata_sensors
@@ -23,23 +23,12 @@ def _config_entry(data: dict):
 
 def test_metadata_sensors_attach_to_expected_devices() -> None:
     """Test static metadata sensors use canonical object IDs and device info."""
-    layout_json = """
-    {
-      "data": {
-        "k_100": {
-          "pls": [{"iid": 1, "n": "53-a"}],
-          "emts": [{"lid": 1, "sn": "1421A01A4FF5"}]
-        },
-        "k_101": {}
-      }
-    }
-    """
     entry = _config_entry(
         {
             CONF_DTU_SERIAL_NUMBER: DTU_SERIAL_NUMBER,
             CONF_DTU_LOCATION: "Plant room",
-            CONF_LAYOUT_JSON: layout_json,
-            CONF_INVERTER_PHASE_MAP: f"{INVERTER_SERIAL_NUMBER}=L2",
+            CONF_INVERTER_LOCATIONS: {INVERTER_SERIAL_NUMBER: "53"},
+            CONF_INVERTER_PHASES: {INVERTER_SERIAL_NUMBER: "2"},
         }
     )
 
@@ -73,8 +62,8 @@ def test_empty_metadata_does_not_create_entities() -> None:
         {
             CONF_DTU_SERIAL_NUMBER: DTU_SERIAL_NUMBER,
             CONF_DTU_LOCATION: "",
-            CONF_LAYOUT_JSON: "",
-            CONF_INVERTER_PHASE_MAP: "",
+            CONF_INVERTER_LOCATIONS: {},
+            CONF_INVERTER_PHASES: {},
         }
     )
 

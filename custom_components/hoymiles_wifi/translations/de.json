@@ -12,8 +12,8 @@
           "meter_type": "Zählertyp",
           "meter_energy_consistency_tolerance": "Toleranz für Zähler-Energiekonsistenz",
           "delete_missing_inverters": "Fehlende Wechselrichter löschen",
-          "layout_json": "Hoymiles Layout-JSON",
           "dtu_location": "DTU-Standort",
+          "inverter_location_map": "Wechselrichter-Standortzuordnung",
           "inverter_phase_map": "Wechselrichter-Phasenzuordnung"
         }
       },
@@ -28,15 +28,15 @@
           "meter_type": "Zählertyp",
           "meter_energy_consistency_tolerance": "Toleranz für Zähler-Energiekonsistenz",
           "delete_missing_inverters": "Fehlende Wechselrichter löschen",
-          "layout_json": "Hoymiles Layout-JSON",
           "dtu_location": "DTU-Standort",
+          "inverter_location_map": "Wechselrichter-Standortzuordnung",
           "inverter_phase_map": "Wechselrichter-Phasenzuordnung"
         }
       }
     },
     "error": {
       "cannot_connect": "Verbindung nicht möglich.",
-      "invalid_layout_json": "Ungültiges Hoymiles Layout-JSON.",
+      "invalid_location_map": "Ungültige Wechselrichter-Standortzuordnung. Verwende eine serial=location Zeile pro Wechselrichter.",
       "invalid_phase_map": "Ungültige Wechselrichter-Phasenzuordnung. Verwende eine serial=phase Zeile pro Wechselrichter mit Phase 1, 2, 3 oder L1, L2, L3."
     },
     "abort": {

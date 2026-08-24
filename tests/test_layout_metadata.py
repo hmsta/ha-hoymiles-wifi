@@ -9,6 +9,7 @@ from custom_components.hoymiles_wifi.layout_metadata import (
     PhaseMapError,
     derive_inverter_locations,
     normalize_location,
+    parse_inverter_location_map,
     parse_inverter_phase_map,
     parse_layout_json,
 )
@@ -59,6 +60,19 @@ def test_parse_inverter_phase_map_normalizes_values() -> None:
         "1421a01a4ff5": "1",
         "1421a01a5294": "2",
         "1421a01a53da": "3",
+    }
+
+
+def test_parse_inverter_location_map_normalizes_serials() -> None:
+    """Test location map serial normalization."""
+    assert parse_inverter_location_map(
+        """
+        1421A01A4FF5=53
+        1421a01a5294: House 77
+        """
+    ) == {
+        "1421a01a4ff5": "53",
+        "1421a01a5294": "House 77",
     }
 
 

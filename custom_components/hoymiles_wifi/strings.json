@@ -12,8 +12,8 @@
           "meter_type": "Meter type",
           "meter_energy_consistency_tolerance": "Meter energy consistency tolerance",
           "delete_missing_inverters": "Delete missing inverters",
-          "layout_json": "Hoymiles layout JSON",
           "dtu_location": "DTU location",
+          "inverter_location_map": "Inverter location map",
           "inverter_phase_map": "Inverter phase map"
         }
       },
@@ -28,15 +28,15 @@
           "meter_type": "Meter type",
           "meter_energy_consistency_tolerance": "Meter energy consistency tolerance",
           "delete_missing_inverters": "Delete missing inverters",
-          "layout_json": "Hoymiles layout JSON",
           "dtu_location": "DTU location",
+          "inverter_location_map": "Inverter location map",
           "inverter_phase_map": "Inverter phase map"
         }
       }
     },
     "error": {
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
-      "invalid_layout_json": "Invalid Hoymiles layout JSON.",
+      "invalid_location_map": "Invalid inverter location map. Use one serial=location line per inverter.",
       "invalid_phase_map": "Invalid inverter phase map. Use one serial=phase line per inverter, with phases 1, 2, 3 or L1, L2, L3."
     },
     "abort": {

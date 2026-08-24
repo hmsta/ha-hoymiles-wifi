@@ -1,6 +1,5 @@
 """Unit tests for the Hoymiles config flow."""
 
-from json import JSONDecodeError
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -22,8 +21,10 @@ from custom_components.hoymiles_wifi.const import (
     CONF_ENC_RAND,
     CONF_TIMEOUT,
     CONF_DTU_LOCATION,
+    CONF_INVERTER_LOCATIONS,
+    CONF_INVERTER_LOCATION_MAP,
     CONF_INVERTER_PHASE_MAP,
-    CONF_LAYOUT_JSON,
+    CONF_INVERTER_PHASES,
     DEFAULT_STARTUP_COOLDOWN_SECONDS,
     DEFAULT_METER_ENERGY_CONSISTENCY_TOLERANCE,
     DEFAULT_TIMEOUT_SECONDS,
@@ -34,6 +35,7 @@ from custom_components.hoymiles_wifi.const import (
 from custom_components.hoymiles_wifi.config_flow import (
     _detected_inverter_serials,
     _metadata_entity_unique_ids,
+    _metadata_map_to_text,
     _remove_claimed_inverters_from_data,
 )
 from custom_components.hoymiles_wifi.error import CannotConnect
@@ -79,9 +81,9 @@ MOCK_DATA_RESULT = {
     CONF_ENC_RAND: "",
     CONF_TIMEOUT: DEFAULT_TIMEOUT_SECONDS,
     CONF_STARTUP_COOLDOWN: DEFAULT_STARTUP_COOLDOWN_SECONDS,
-    CONF_LAYOUT_JSON: "",
     CONF_DTU_LOCATION: "",
-    CONF_INVERTER_PHASE_MAP: "",
+    CONF_INVERTER_LOCATIONS: {},
+    CONF_INVERTER_PHASES: {},
     CONF_METER_ENERGY_CONSISTENCY_TOLERANCE: (
         DEFAULT_METER_ENERGY_CONSISTENCY_TOLERANCE
     ),
@@ -161,6 +163,15 @@ def _add_config_entry(
     return entry
 
 
+def _schema_default(schema, key_name: str):
+    """Return a voluptuous schema marker default for a config-flow field."""
+    for marker in schema.schema:
+        if getattr(marker, "schema", marker) == key_name:
+            default = marker.default
+            return default() if callable(default) else default
+    raise AssertionError(f"{key_name} is not in the schema")
+
+
 def _discovered_config_data(
     *,
     dtu_serial_number: str,
@@ -205,15 +216,11 @@ def test_detected_inverter_serials_collects_all_device_shapes() -> None:
 
 def test_metadata_entity_unique_ids_follow_generated_sensor_shape() -> None:
     """Test metadata entity unique IDs are derived from stored metadata."""
-    layout_json = (
-        '{"data":{"k_100":{"pls":[{"iid":1,"n":"53-a"}],'
-        f'"emts":[{{"lid":1,"sn":"{INVERTER_A_SERIAL_NUMBER.upper()}"}}]}}}}'
-    )
     data = {
         **MOCK_DATA_RESULT,
         CONF_DTU_LOCATION: "garage",
-        CONF_LAYOUT_JSON: layout_json,
-        CONF_INVERTER_PHASE_MAP: f"{INVERTER_A_SERIAL_NUMBER.upper()}=L2",
+        CONF_INVERTER_LOCATIONS: {INVERTER_A_SERIAL_NUMBER: "53"},
+        CONF_INVERTER_PHASES: {INVERTER_A_SERIAL_NUMBER: "2"},
         CONF_INVERTERS: [INVERTER_A_SERIAL_NUMBER.upper()],
     }
 
@@ -222,6 +229,58 @@ def test_metadata_entity_unique_ids_follow_generated_sensor_shape() -> None:
         f"hoymiles_entry-a_{INVERTER_A_SERIAL_NUMBER}_metadata.location",
         f"hoymiles_entry-a_{INVERTER_A_SERIAL_NUMBER}_metadata.phase",
     }
+
+
+def test_metadata_map_to_text_renders_sorted_lines() -> None:
+    """Test stored metadata dictionaries are rendered as text maps."""
+    assert _metadata_map_to_text(
+        {
+            INVERTER_B_SERIAL_NUMBER.upper(): "77",
+            INVERTER_A_SERIAL_NUMBER: "53",
+        }
+    ) == f"{INVERTER_A_SERIAL_NUMBER}=53\n{INVERTER_B_SERIAL_NUMBER}=77"
+
+
+async def test_reconfigure_form_renders_stored_metadata_maps(
+    hass: HomeAssistant,
+) -> None:
+    """Test stored metadata dictionaries are rendered back into text boxes."""
+    entry = _add_config_entry(
+        hass,
+        entry_id="dtu-a",
+        dtu_serial_number=DTU_TEST_SERIAL_NUMBER,
+        single_phase_inverters=[INVERTER_A_SERIAL_NUMBER, INVERTER_B_SERIAL_NUMBER],
+    )
+    hass.config_entries.async_update_entry(
+        entry,
+        data={
+            **entry.data,
+            CONF_INVERTER_LOCATIONS: {
+                INVERTER_B_SERIAL_NUMBER: "77",
+                INVERTER_A_SERIAL_NUMBER: "53",
+            },
+            CONF_INVERTER_PHASES: {
+                INVERTER_B_SERIAL_NUMBER: "2",
+                INVERTER_A_SERIAL_NUMBER: "1",
+            },
+        },
+    )
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "entry_id": entry.entry_id,
+        },
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert _schema_default(
+        result["data_schema"], CONF_INVERTER_LOCATION_MAP
+    ) == f"{INVERTER_A_SERIAL_NUMBER}=53\n{INVERTER_B_SERIAL_NUMBER}=77"
+    assert _schema_default(
+        result["data_schema"], CONF_INVERTER_PHASE_MAP
+    ) == f"{INVERTER_A_SERIAL_NUMBER}=1\n{INVERTER_B_SERIAL_NUMBER}=2"
 
 
 def test_remove_claimed_inverters_from_data_preserves_meters() -> None:
@@ -428,17 +487,17 @@ async def test_reconfigure_keeps_own_meter(hass: HomeAssistant) -> None:
     ]
 
 
-async def test_reconfigure_stores_layout_and_metadata(
+async def test_reconfigure_stores_filtered_metadata_dicts(
     hass: HomeAssistant,
 ) -> None:
-    """Test valid metadata is stored and phase mappings are normalized."""
+    """Test valid metadata maps are filtered and stored as dictionaries."""
 
     entry = _add_config_entry(
         hass,
         entry_id="dtu-a",
         dtu_serial_number=DTU_TEST_SERIAL_NUMBER,
+        single_phase_inverters=[INVERTER_A_SERIAL_NUMBER],
     )
-    layout_json = '{"data":{"k_100":{"pls":[],"emts":[]},"k_101":{}}}'
 
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
@@ -463,20 +522,26 @@ async def test_reconfigure_stores_layout_and_metadata(
             result["flow_id"],
             {
                 **MOCK_DATA_STEP,
-                CONF_LAYOUT_JSON: layout_json,
                 CONF_DTU_LOCATION: "53",
-                CONF_INVERTER_PHASE_MAP: "1421A01A4FF5=L1\n1421a01a5294=2",
+                CONF_INVERTER_LOCATION_MAP: (
+                    f"{INVERTER_A_SERIAL_NUMBER.upper()}=53\n"
+                    f"{INVERTER_B_SERIAL_NUMBER}=77"
+                ),
+                CONF_INVERTER_PHASE_MAP: (
+                    f"{INVERTER_A_SERIAL_NUMBER.upper()}=L1\n"
+                    f"{INVERTER_B_SERIAL_NUMBER}=2"
+                ),
             },
         )
     await hass.async_block_till_done()
 
     assert result2["type"] == FlowResultType.ABORT
     assert result2["reason"] == "reconfigure_successful"
-    assert entry.data[CONF_LAYOUT_JSON] == layout_json
     assert entry.data[CONF_DTU_LOCATION] == "53"
-    assert entry.data[CONF_INVERTER_PHASE_MAP] == (
-        "1421a01a4ff5=1\n1421a01a5294=2"
-    )
+    assert entry.data[CONF_INVERTER_LOCATIONS] == {
+        INVERTER_A_SERIAL_NUMBER: "53"
+    }
+    assert entry.data[CONF_INVERTER_PHASES] == {INVERTER_A_SERIAL_NUMBER: "1"}
 
 
 async def test_reconfigure_rejects_invalid_metadata_without_connecting(
@@ -506,14 +571,14 @@ async def test_reconfigure_rejects_invalid_metadata_without_connecting(
             result["flow_id"],
             {
                 **MOCK_DATA_STEP,
-                CONF_LAYOUT_JSON: "{",
+                CONF_INVERTER_LOCATION_MAP: "1421a01a4ff5",
                 CONF_INVERTER_PHASE_MAP: "1421a01a4ff5=4",
             },
         )
 
     assert result2["type"] == FlowResultType.FORM
     assert result2["errors"] == {
-        CONF_LAYOUT_JSON: "invalid_layout_json",
+        CONF_INVERTER_LOCATION_MAP: "invalid_location_map",
         CONF_INVERTER_PHASE_MAP: "invalid_phase_map",
     }
     mock_discovery.assert_not_awaited()

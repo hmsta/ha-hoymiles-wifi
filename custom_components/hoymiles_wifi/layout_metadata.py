@@ -9,16 +9,25 @@ from typing import Any
 
 
 class LayoutMetadataError(ValueError):
-    """Raised when stored layout metadata cannot be parsed."""
+    """Raised when Hoymiles layout metadata cannot be parsed."""
 
 
 class PhaseMapError(ValueError):
     """Raised when the inverter phase map cannot be parsed."""
 
 
+class MetadataMapError(ValueError):
+    """Raised when a serial=value metadata map cannot be parsed."""
+
+
 def normalize_serial(serial_number: Any) -> str:
     """Normalize Hoymiles serials for entity IDs and metadata lookups."""
     return str(serial_number or "").strip().lower()
+
+
+def normalize_metadata_value(value: Any) -> str:
+    """Normalize optional metadata values without turning None into text."""
+    return "" if value is None else str(value).strip()
 
 
 def parse_layout_json(raw_layout: Any) -> dict[str, Any] | None:
@@ -80,35 +89,66 @@ def derive_inverter_locations(raw_layout: Any) -> dict[str, str]:
 
 def parse_inverter_phase_map(raw_map: Any) -> dict[str, str]:
     """Parse serial=phase lines and normalize phases to 1/2/3."""
+    phases: dict[str, str] = {}
+    try:
+        phase_map = parse_inverter_metadata_map(raw_map)
+    except MetadataMapError as err:
+        raise PhaseMapError(str(err)) from err
+
+    for serial, raw_phase in phase_map.items():
+        phase = normalize_phase(raw_phase)
+        if phase is None:
+            raise PhaseMapError(f"{serial} has an invalid phase")
+        phases[serial] = phase
+
+    return phases
+
+
+def parse_inverter_location_map(raw_map: Any) -> dict[str, str]:
+    """Parse serial=location lines."""
+    return parse_inverter_metadata_map(raw_map)
+
+
+def parse_inverter_metadata_map(raw_map: Any) -> dict[str, str]:
+    """Parse serial=value lines into a normalized metadata dictionary."""
     if raw_map is None:
         return {}
+
+    if isinstance(raw_map, dict):
+        parsed: dict[str, str] = {}
+        for serial_number, raw_value in raw_map.items():
+            serial = normalize_serial(serial_number)
+            value = normalize_metadata_value(raw_value)
+            if serial and value:
+                parsed[serial] = value
+        return parsed
 
     text = str(raw_map).strip()
     if not text:
         return {}
 
-    phases: dict[str, str] = {}
+    parsed: dict[str, str] = {}
     for line_number, raw_line in enumerate(text.splitlines(), start=1):
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
 
         if "=" in line:
-            serial, phase = line.split("=", 1)
+            serial, value = line.split("=", 1)
         elif ":" in line:
-            serial, phase = line.split(":", 1)
+            serial, value = line.split(":", 1)
         else:
-            raise PhaseMapError(f"Line {line_number} must use serial=phase")
+            raise MetadataMapError(f"Line {line_number} must use serial=value")
 
         serial = normalize_serial(serial)
-        phase = normalize_phase(phase)
+        value = str(value or "").strip()
         if not serial:
-            raise PhaseMapError(f"Line {line_number} is missing a serial")
-        if phase is None:
-            raise PhaseMapError(f"Line {line_number} has an invalid phase")
-        phases[serial] = phase
+            raise MetadataMapError(f"Line {line_number} is missing a serial")
+        if not value:
+            raise MetadataMapError(f"Line {line_number} is missing a value")
+        parsed[serial] = value
 
-    return phases
+    return parsed
 
 
 def normalize_phase(raw_phase: Any) -> str | None:

@@ -860,8 +860,8 @@
       );
 
       this._config = {
-        entryId: config.entry_id ?? config.entryId ?? "",
         layout: config.layout == null ? null : maybeJson(config.layout),
+        layoutUrl: String(config.layout_url ?? config.layoutUrl ?? "").trim(),
         values: asObject(config.values),
         entities: this._normalizeEntities(config.entities),
         mode: this._normalizeMode(config.mode),
@@ -889,7 +889,6 @@
         )),
         height: cssLength(config.height ?? config.map_height ?? config.mapHeight ?? config.card_height ?? config.cardHeight),
         minHeight: cssLength(config.min_height ?? config.minHeight, "420px"),
-        backgroundUrl: config.background_url ?? config.backgroundUrl ?? "",
         showSerial: config.show_serial !== false && config.showSerial !== false,
         showModeToggle: config.show_mode_toggle !== false && config.showModeToggle !== false,
         showReplayControl: config.show_replay_control !== false
@@ -940,7 +939,12 @@
       const hadHass = Boolean(this._hass);
       this._hass = hass;
       if (!hadHass) this._entityIndex = null;
-      if (this._config && this._config.layout == null && !this._state.layout) {
+      if (
+        this._config
+        && this._config.layout == null
+        && this._config.layoutUrl
+        && !this._state.layout
+      ) {
         this._loadLayout();
       }
       if (!this._updatePanelValues()) this._scheduleRender();
@@ -1487,33 +1491,37 @@
     }
 
     _loadLayout() {
-      if (this._config.layout == null) {
-        this._loadStoredLayout();
+      if (this._config.layout != null) {
+        this._applyLayout(this._config.layout);
         return;
       }
 
-      this._applyLayout(this._config.layout);
+      if (this._config.layoutUrl) {
+        this._loadLayoutUrl();
+        return;
+      }
+
+      this._showError("Set layout_url to a Hoymiles layout JSON file or provide inline layout.");
     }
 
-    async _loadStoredLayout() {
-      if (!this._hass || typeof this._hass.callWS !== "function") {
-        this._showError("Hoymiles layout JSON is not configured yet.");
-        return;
-      }
-
+    async _loadLayoutUrl() {
       const token = ++this._layoutLoadToken;
       try {
-        const message = { type: "hoymiles_wifi/layout" };
-        if (this._config.entryId) message.entry_id = this._config.entryId;
-        const result = await this._hass.callWS(message);
+        const response = await fetch(this._config.layoutUrl, {
+          credentials: "same-origin",
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const text = await response.text();
         if (token !== this._layoutLoadToken) return;
-        const layout = maybeJson(result && result.layout);
-        if (!layout) throw new Error("Stored Hoymiles layout JSON is empty");
+        const layout = JSON.parse(text);
+        if (!layout) throw new Error("Hoymiles layout JSON is empty");
         this._config.layout = layout;
         this._applyLayout(layout);
       } catch (error) {
         if (token !== this._layoutLoadToken) return;
-        this._showError(`Could not load stored Hoymiles layout: ${error.message}`);
+        this._showError(`Could not load Hoymiles layout from layout_url: ${error.message}`);
       }
     }
 
@@ -1541,7 +1549,7 @@
         };
         this._state.points = this._extractPanels(layout);
         this._rebuildRows();
-        this._background.src = this._config.backgroundUrl || (image && image.mu) || "";
+        this._background.src = (image && image.mu) || "";
         this.style.setProperty("--hoymiles-map-aspect", String(this._config.aspect || DEFAULT_ASPECT));
         this.style.setProperty("--hoymiles-map-min-height", this._config.minHeight);
         if (this._config.height) {

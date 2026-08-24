@@ -12,8 +12,8 @@
           "meter_type": "Type de compteur",
           "meter_energy_consistency_tolerance": "Tolérance de cohérence énergétique du compteur",
           "delete_missing_inverters": "Supprimer les onduleurs manquants",
-          "layout_json": "JSON de disposition Hoymiles",
           "dtu_location": "Emplacement DTU",
+          "inverter_location_map": "Carte des emplacements des onduleurs",
           "inverter_phase_map": "Carte des phases des onduleurs"
         }
       },
@@ -28,15 +28,15 @@
           "meter_type": "Type de compteur",
           "meter_energy_consistency_tolerance": "Tolérance de cohérence énergétique du compteur",
           "delete_missing_inverters": "Supprimer les onduleurs manquants",
-          "layout_json": "JSON de disposition Hoymiles",
           "dtu_location": "Emplacement DTU",
+          "inverter_location_map": "Carte des emplacements des onduleurs",
           "inverter_phase_map": "Carte des phases des onduleurs"
         }
       }
     },
     "error": {
       "cannot_connect": "Échec de la connexion.",
-      "invalid_layout_json": "JSON de disposition Hoymiles invalide.",
+      "invalid_location_map": "Carte des emplacements des onduleurs invalide. Utilisez une ligne serial=location par onduleur.",
       "invalid_phase_map": "Carte des phases des onduleurs invalide. Utilisez une ligne serial=phase par onduleur, avec les phases 1, 2, 3 ou L1, L2, L3."
     },
     "abort": {

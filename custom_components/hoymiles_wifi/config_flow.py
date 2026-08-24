@@ -7,7 +7,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
@@ -20,8 +20,10 @@ from .const import (
     CONF_DTU_SERIAL_NUMBER,
     CONF_HYBRID_INVERTERS,
     CONF_INVERTERS,
+    CONF_INVERTER_LOCATIONS,
+    CONF_INVERTER_LOCATION_MAP,
     CONF_INVERTER_PHASE_MAP,
-    CONF_LAYOUT_JSON,
+    CONF_INVERTER_PHASES,
     CONF_METERS,
     CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
     CONF_METER_TYPE,
@@ -49,11 +51,11 @@ from .const import (
 from .entity_migration import async_migrate_entity_unique_ids
 from .error import CannotConnect
 from .layout_metadata import (
-    derive_inverter_locations,
-    LayoutMetadataError,
+    MetadataMapError,
     PhaseMapError,
+    normalize_metadata_value,
+    parse_inverter_location_map,
     parse_inverter_phase_map,
-    parse_layout_json,
 )
 from .util import async_get_config_entry_data_for_host
 
@@ -110,22 +112,24 @@ def _apply_meter_type_override(meters: list[dict], meter_type: str) -> list[dict
 
 def _metadata_from_user_input(user_input: dict[str, Any]) -> tuple[str, str, str]:
     """Return normalized metadata input strings from a config flow submission."""
-    layout_json = str(user_input.get(CONF_LAYOUT_JSON) or "").strip()
     dtu_location = str(user_input.get(CONF_DTU_LOCATION) or "").strip()
+    inverter_location_map = str(
+        user_input.get(CONF_INVERTER_LOCATION_MAP) or ""
+    ).strip()
     inverter_phase_map = str(user_input.get(CONF_INVERTER_PHASE_MAP) or "").strip()
-    return layout_json, dtu_location, inverter_phase_map
+    return dtu_location, inverter_location_map, inverter_phase_map
 
 
 def _validate_metadata_input(
-    layout_json: str, inverter_phase_map: str
+    inverter_location_map: str, inverter_phase_map: str
 ) -> dict[str, str]:
     """Validate stored metadata fields and return field errors."""
     errors = {}
-    if layout_json:
+    if inverter_location_map:
         try:
-            parse_layout_json(layout_json)
-        except LayoutMetadataError:
-            errors[CONF_LAYOUT_JSON] = "invalid_layout_json"
+            parse_inverter_location_map(inverter_location_map)
+        except MetadataMapError:
+            errors[CONF_INVERTER_LOCATION_MAP] = "invalid_location_map"
 
     if inverter_phase_map:
         try:
@@ -136,10 +140,32 @@ def _validate_metadata_input(
     return errors
 
 
-def _normalize_inverter_phase_map_text(inverter_phase_map: str) -> str:
-    """Return a deterministic normalized phase map string."""
-    phases = parse_inverter_phase_map(inverter_phase_map)
-    return "\n".join(f"{serial}={phase}" for serial, phase in sorted(phases.items()))
+def _metadata_map_to_text(metadata: Any) -> str:
+    """Return a deterministic serial=value text map from stored metadata."""
+    if not isinstance(metadata, dict):
+        return ""
+    return "\n".join(
+        f"{serial}={value}"
+        for serial, value in sorted(
+            (
+                (
+                    _normalize_serial(serial),
+                    normalize_metadata_value(value),
+                )
+                for serial, value in metadata.items()
+            )
+        )
+        if serial and value
+    )
+
+
+def _filter_metadata_map(metadata: dict[str, str], serials: set[str]) -> dict[str, str]:
+    """Return metadata for serials that belong to the current config entry."""
+    return {
+        serial: value
+        for serial, value in sorted(metadata.items())
+        if serial in serials and value
+    }
 
 
 def _filter_duplicate_meters(
@@ -186,15 +212,22 @@ def _metadata_entity_unique_ids(entry_id: str, data: dict) -> set[str]:
         data.get(CONF_HYBRID_INVERTERS, []),
     )
 
-    try:
-        locations = derive_inverter_locations(data.get(CONF_LAYOUT_JSON))
-    except LayoutMetadataError:
+    locations = data.get(CONF_INVERTER_LOCATIONS)
+    if not isinstance(locations, dict):
         locations = {}
-
-    try:
-        phases = parse_inverter_phase_map(data.get(CONF_INVERTER_PHASE_MAP))
-    except PhaseMapError:
+    locations = {
+        _normalize_serial(serial): normalize_metadata_value(value)
+        for serial, value in locations.items()
+        if _normalize_serial(serial) and normalize_metadata_value(value)
+    }
+    phases = data.get(CONF_INVERTER_PHASES)
+    if not isinstance(phases, dict):
         phases = {}
+    phases = {
+        _normalize_serial(serial): normalize_metadata_value(value)
+        for serial, value in phases.items()
+        if _normalize_serial(serial) and normalize_metadata_value(value)
+    }
 
     for serial_number in inverter_serials:
         if locations.get(serial_number):
@@ -548,9 +581,9 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                         CONF_ENC_RAND: enc_rand,
                         CONF_TIMEOUT: timeout,
                         CONF_STARTUP_COOLDOWN: startup_cooldown,
-                        CONF_LAYOUT_JSON: "",
                         CONF_DTU_LOCATION: "",
-                        CONF_INVERTER_PHASE_MAP: "",
+                        CONF_INVERTER_LOCATIONS: {},
+                        CONF_INVERTER_PHASES: {},
                     },
                 )
 
@@ -570,9 +603,11 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             host = user_input[CONF_HOST]
-            layout_json, dtu_location, inverter_phase_map = _metadata_from_user_input(
-                user_input
-            )
+            (
+                dtu_location,
+                inverter_location_map,
+                inverter_phase_map,
+            ) = _metadata_from_user_input(user_input)
             update_interval = user_input.get(
                 CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL_SECONDS
             )
@@ -595,12 +630,13 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
             delete_missing_inverters = user_input.get(
                 CONF_DELETE_MISSING_INVERTERS, False
             )
-            errors.update(_validate_metadata_input(layout_json, inverter_phase_map))
+            errors.update(
+                _validate_metadata_input(inverter_location_map, inverter_phase_map)
+            )
 
             if not errors:
-                inverter_phase_map = _normalize_inverter_phase_map_text(
-                    inverter_phase_map
-                )
+                inverter_locations = parse_inverter_location_map(inverter_location_map)
+                inverter_phases = parse_inverter_phase_map(inverter_phase_map)
                 try:
                     (
                         dtu_sn,
@@ -641,6 +677,12 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                     hybrid_inverters,
                     delete_missing_inverters,
                 )
+                inverter_serials = _detected_inverter_serials(
+                    single_phase_inverters,
+                    three_phase_inverters,
+                    ports,
+                    hybrid_inverters,
+                )
 
                 data = {
                     CONF_HOST: host,
@@ -659,9 +701,13 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                     CONF_ENC_RAND: enc_rand,
                     CONF_TIMEOUT: timeout,
                     CONF_STARTUP_COOLDOWN: startup_cooldown,
-                    CONF_LAYOUT_JSON: layout_json,
                     CONF_DTU_LOCATION: dtu_location,
-                    CONF_INVERTER_PHASE_MAP: inverter_phase_map,
+                    CONF_INVERTER_LOCATIONS: _filter_metadata_map(
+                        inverter_locations, inverter_serials
+                    ),
+                    CONF_INVERTER_PHASES: _filter_metadata_map(
+                        inverter_phases, inverter_serials
+                    ),
                 }
 
                 old_data = dict(entry.data)
@@ -741,16 +787,20 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                         default=False,
                     ): bool,
                     vol.Optional(
-                        CONF_LAYOUT_JSON,
-                        default=entry.data.get(CONF_LAYOUT_JSON, ""),
-                    ): TextSelector(TextSelectorConfig(multiline=True)),
-                    vol.Optional(
                         CONF_DTU_LOCATION,
                         default=entry.data.get(CONF_DTU_LOCATION, ""),
                     ): str,
                     vol.Optional(
+                        CONF_INVERTER_LOCATION_MAP,
+                        default=_metadata_map_to_text(
+                            entry.data.get(CONF_INVERTER_LOCATIONS)
+                        ),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
+                    vol.Optional(
                         CONF_INVERTER_PHASE_MAP,
-                        default=entry.data.get(CONF_INVERTER_PHASE_MAP, ""),
+                        default=_metadata_map_to_text(
+                            entry.data.get(CONF_INVERTER_PHASES)
+                        ),
                     ): TextSelector(TextSelectorConfig(multiline=True)),
                 }
             ),

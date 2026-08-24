@@ -41,8 +41,8 @@ from .const import (
     CONF_DTU_SERIAL_NUMBER,
     CONF_INVERTERS,
     CONF_HYBRID_INVERTERS,
-    CONF_INVERTER_PHASE_MAP,
-    CONF_LAYOUT_JSON,
+    CONF_INVERTER_LOCATIONS,
+    CONF_INVERTER_PHASES,
     CONF_METERS,
     CONF_PORTS,
     CONF_THREE_PHASE_INVERTERS,
@@ -63,10 +63,8 @@ from .entity import (
     DeviceType,
 )
 from .layout_metadata import (
-    LayoutMetadataError,
-    derive_inverter_locations,
+    normalize_metadata_value,
     normalize_serial,
-    parse_inverter_phase_map,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -1349,7 +1347,7 @@ def _metadata_sensors(
     ports: list,
     hybrid_inverters: list,
 ) -> list[SensorEntity]:
-    """Build static metadata sensors from stored layout and user mappings."""
+    """Build static metadata sensors from stored user mappings."""
     sensors: list[SensorEntity] = []
     dtu_serial_number = str(config_entry.data[CONF_DTU_SERIAL_NUMBER])
 
@@ -1368,8 +1366,8 @@ def _metadata_sensors(
     inverter_serials = _configured_inverter_serials(
         inverters, ports, hybrid_inverters
     )
-    locations = _derived_locations(config_entry)
-    phases = _configured_phases(config_entry)
+    locations = _configured_metadata(config_entry, CONF_INVERTER_LOCATIONS)
+    phases = _configured_metadata(config_entry, CONF_INVERTER_PHASES)
 
     for serial in sorted(inverter_serials):
         location = locations.get(serial)
@@ -1425,24 +1423,16 @@ def _configured_inverter_serials(
     return {serial for serial in serials if serial}
 
 
-def _derived_locations(config_entry: ConfigEntry) -> dict[str, str]:
-    """Return layout-derived inverter locations."""
-    try:
-        return derive_inverter_locations(config_entry.data.get(CONF_LAYOUT_JSON))
-    except LayoutMetadataError:
-        _LOGGER.warning("Ignoring invalid stored Hoymiles layout JSON")
+def _configured_metadata(config_entry: ConfigEntry, key: str) -> dict[str, str]:
+    """Return stored static inverter metadata."""
+    metadata = config_entry.data.get(key)
+    if not isinstance(metadata, dict):
         return {}
-
-
-def _configured_phases(config_entry: ConfigEntry) -> dict[str, str]:
-    """Return manually configured inverter phases."""
-    try:
-        return parse_inverter_phase_map(
-            config_entry.data.get(CONF_INVERTER_PHASE_MAP)
-        )
-    except ValueError:
-        _LOGGER.warning("Ignoring invalid stored Hoymiles inverter phase map")
-        return {}
+    return {
+        normalize_serial(serial): normalize_metadata_value(value)
+        for serial, value in metadata.items()
+        if normalize_serial(serial) and normalize_metadata_value(value)
+    }
 
 
 def get_sensors_for_description(
