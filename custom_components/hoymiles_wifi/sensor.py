@@ -1397,7 +1397,7 @@ def _metadata_sensor(
         translation_key=kind,
         icon="mdi:map-marker" if kind == "location" else "mdi:transmission-tower",
         entity_category=EntityCategory.DIAGNOSTIC,
-        serial_number=normalize_serial(serial_number),
+        serial_number=str(serial_number).strip(),
         is_dtu_sensor=is_dtu_sensor,
     )
     return HoymilesStaticMetadataSensorEntity(config_entry, description, value)

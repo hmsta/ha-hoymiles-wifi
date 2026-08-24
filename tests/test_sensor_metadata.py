@@ -12,7 +12,7 @@ from custom_components.hoymiles_wifi.const import (
 from custom_components.hoymiles_wifi.sensor import _metadata_sensors
 
 
-DTU_SERIAL_NUMBER = "4121a01953c8"
+DTU_SERIAL_NUMBER = "4121A01953C8"
 INVERTER_SERIAL_NUMBER = "1421a01a4ff5"
 
 
@@ -51,6 +51,9 @@ def test_metadata_sensors_attach_to_expected_devices() -> None:
     assert by_object_id["dtu_4121a01953c8_location"].native_value == "Plant room"
     assert by_object_id["inverter_1421a01a4ff5_location"].native_value == "53"
     assert by_object_id["inverter_1421a01a4ff5_phase"].native_value == "2"
+    assert by_object_id["dtu_4121a01953c8_location"].device_info[
+        "identifiers"
+    ] == {(DOMAIN, DTU_SERIAL_NUMBER)}
     assert by_object_id["inverter_1421a01a4ff5_phase"].device_info[
         "identifiers"
     ] == {(DOMAIN, INVERTER_SERIAL_NUMBER)}
