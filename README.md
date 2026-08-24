@@ -328,7 +328,7 @@ Available table features:
 
 Default inverter columns are inverter, location, phase, state, AC power, AC current, temperature, and RSSI. Default panel columns are inverter, location, phase, port, DC power, DC voltage, DC current, and daily energy. Default DTU columns are DTU, location, status, IP, power, and daily energy.
 
-Table cards render immediately when opened and then refresh at most every 300 seconds by default. Set `refresh_interval: 0` to disable passive refreshes; the card will still use the latest Home Assistant state when search, filters, sorting, page size, or pagination are changed. Set `show_filters: false` to hide the search/filter/page-size toolbar. Default filters can be set with `filters`.
+Table cards render immediately when opened and then refresh at most every 300 seconds by default. Set `refresh_interval: 0` to disable passive refreshes; the card will still use the latest Home Assistant state when search, filters, sorting, page size, or pagination are changed. Set `show_filters: false` to hide the search/filter/page-size toolbar; this also hides the matched-row summary unless `show_summary: true` is set. Set `show_pagination: false` to hide the bottom pagination row. Default filters can be set with `filters`.
 
 Panel production filters are `all`, `producing`, `online_zero`, `no_grid`, `unreachable`, and `unknown`. `online_zero` matches the old script behavior: inverter grid voltage above 100 V, panel DC voltage above 1 V, and panel DC current below 0.01 A.
 
@@ -350,6 +350,8 @@ filters:
   production: online_zero
 refresh_interval: 0
 show_filters: false
+show_summary: false
+show_pagination: false
 ```
 
 The same `filters` object works on all table cards. Inverter cards accept `search`, `location`, `phase`, and `state`; DTU cards accept `search`, `location`, and `status`; panel cards accept `search`, `location`, `phase`, and `production`. Existing `production_status` is still accepted as a panel-card alias.

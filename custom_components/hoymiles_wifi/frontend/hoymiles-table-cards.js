@@ -570,6 +570,30 @@
           ),
           true,
         ),
+        showSummary: optionalBoolean(
+          config && (
+            config.show_summary
+            ?? config.showSummary
+          ),
+          optionalBoolean(
+            config && (
+              config.show_filters
+              ?? config.showFilters
+              ?? config.show_toolbar
+              ?? config.showToolbar
+            ),
+            true,
+          ),
+        ),
+        showPagination: optionalBoolean(
+          config && (
+            config.show_pagination
+            ?? config.showPagination
+            ?? config.show_pager
+            ?? config.showPager
+          ),
+          true,
+        ),
       };
       this._search = this._config.defaultSearch;
       this._filters = Object.fromEntries(
@@ -857,11 +881,11 @@
         <ha-card>
           <h2 class="title">${this._escape(this._title())}</h2>
           ${this._config.showFilters ? this._toolbar(rows) : ""}
-          <p class="summary">${filtered.length} matched of ${rows.length}</p>
+          ${this._config.showSummary ? `<p class="summary">${filtered.length} matched of ${rows.length}</p>` : ""}
           <div class="tableWrap">
             ${visible.length ? this._table(visible) : '<div class="empty">No matching Hoymiles entities</div>'}
           </div>
-          ${this._pager(filtered.length, pageCount)}
+          ${this._config.showPagination ? this._pager(filtered.length, pageCount) : ""}
         </ha-card>
       `;
       this._hasRendered = true;
