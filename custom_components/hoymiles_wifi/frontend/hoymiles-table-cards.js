@@ -5,6 +5,8 @@
   const UNAVAILABLE = new Set(["unknown", "unavailable", "none", ""]);
   const DEFAULT_PAGE_SIZE = 25;
   const DEFAULT_OFF_THRESHOLD_WATTS = 1;
+  const DEFAULT_REFRESH_INTERVAL_SECONDS = 300;
+  const PANEL_PRODUCTION_FILTERS = ["all", "producing", "online_zero", "no_grid", "unreachable", "unknown"];
 
   const CARD_TYPES = {
     inverter: "hoymiles-inverter-card",
@@ -210,7 +212,8 @@
     }
 
     .state.no_grid .dot,
-    .state.zero .dot {
+    .state.zero .dot,
+    .state.online_zero .dot {
       background: #e09f28;
     }
 
@@ -347,6 +350,38 @@
     return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
   }
 
+  function optionalNumber(value, fallback) {
+    if (value === undefined || value === null || value === "") return fallback;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+
+  function optionalBoolean(value, fallback) {
+    if (value === undefined || value === null || value === "") return fallback;
+    if (typeof value === "boolean") return value;
+    return !["false", "0", "no", "off"].includes(String(value).trim().toLowerCase());
+  }
+
+  function firstConfigured(...values) {
+    return values.find((value) => value !== undefined && value !== null && value !== "");
+  }
+
+  function textFilter(value) {
+    return value === undefined || value === null ? "" : String(value).trim();
+  }
+
+  function keyFilter(value) {
+    return slug(textFilter(value));
+  }
+
+  function productionFilter(value) {
+    const filter = keyFilter(value);
+    if (["zero", "zero_production", "no_production", "online_no_production"].includes(filter)) {
+      return "online_zero";
+    }
+    return filter;
+  }
+
   function labelForColumn(key) {
     if (LABELS[key]) return LABELS[key];
     return String(key || "")
@@ -425,12 +460,14 @@
   function panelStatus(hass, serial, port, offThresholdWatts) {
     const power = numericState(hass, portEntity(serial, port, "dc_power"));
     const voltage = numericState(hass, portEntity(serial, port, "dc_voltage"));
+    const current = numericState(hass, portEntity(serial, port, "dc_current"));
     const parentState = inverterState(hass, serial);
 
-    if (parentState === "unreachable") return "off";
+    if (parentState === "unreachable") return "unreachable";
+    if (parentState === "no_grid") return "no_grid";
     if (power != null && power > offThresholdWatts) return "producing";
-    if (voltage != null && voltage > 1) return "zero";
-    return "off";
+    if (voltage != null && current != null && voltage > 1 && current < 0.01) return "online_zero";
+    return "unknown";
   }
 
   function dtuStatus(hass, serial) {
@@ -450,10 +487,67 @@
       this._filters = {};
       this._sort = null;
       this._page = 0;
+      this._lastPassiveRender = 0;
+      this._hasRendered = false;
       this.attachShadow({ mode: "open" });
     }
 
     setConfig(config) {
+      const refreshInterval = optionalNumber(
+        config && (config.refresh_interval ?? config.refreshInterval),
+        DEFAULT_REFRESH_INTERVAL_SECONDS,
+      );
+      const configuredFiltersSource = config && (config.filters ?? config.default_filters ?? config.defaultFilters);
+      const configuredFilters = configuredFiltersSource && typeof configuredFiltersSource === "object"
+        ? configuredFiltersSource
+        : {};
+      const defaultSearch = textFilter(firstConfigured(
+        configuredFilters.search,
+        config && config.search,
+        config && config.default_search,
+        config && config.defaultSearch,
+      ));
+      const defaultFilters = {
+        location: textFilter(firstConfigured(
+          configuredFilters.location,
+          config && config.location,
+          config && config.default_location,
+          config && config.defaultLocation,
+        )),
+      };
+      if (this._kind !== "dtu") {
+        defaultFilters.phase = textFilter(firstConfigured(
+          configuredFilters.phase,
+          config && config.phase,
+          config && config.default_phase,
+          config && config.defaultPhase,
+        ));
+      }
+      if (this._kind === "inverter") {
+        defaultFilters.state = keyFilter(firstConfigured(
+          configuredFilters.state,
+          config && config.state,
+          config && config.default_state,
+          config && config.defaultState,
+        ));
+      } else if (this._kind === "panels") {
+        defaultFilters.production = productionFilter(firstConfigured(
+          configuredFilters.production,
+          configuredFilters.production_status,
+          configuredFilters.productionStatus,
+          config && config.production_status,
+          config && config.productionStatus,
+          config && config.production,
+          "online_zero",
+        ));
+      } else if (this._kind === "dtu") {
+        defaultFilters.status = keyFilter(firstConfigured(
+          configuredFilters.status,
+          config && config.status,
+          config && config.default_status,
+          config && config.defaultStatus,
+        ));
+      }
       this._config = {
         title: config && config.title,
         columns: Array.isArray(config && config.columns)
@@ -464,20 +558,41 @@
           0,
           Number(config && (config.off_threshold_watts ?? config.offThresholdWatts)) || DEFAULT_OFF_THRESHOLD_WATTS,
         ),
-        defaultProductionStatus: config && (config.production_status ?? config.productionStatus) || "zero",
+        defaultFilters,
+        defaultSearch,
+        refreshIntervalMs: Math.max(0, refreshInterval) * 1000,
+        showFilters: optionalBoolean(
+          config && (
+            config.show_filters
+            ?? config.showFilters
+            ?? config.show_toolbar
+            ?? config.showToolbar
+          ),
+          true,
+        ),
       };
-      this._filters = {};
-      if (this._kind === "panels") {
-        this._filters.production = this._config.defaultProductionStatus;
-      }
+      this._search = this._config.defaultSearch;
+      this._filters = Object.fromEntries(
+        Object.entries(this._config.defaultFilters).filter(([, value]) => value),
+      );
       this._sort = { key: this._config.columns[0], dir: "asc" };
       this._page = 0;
-      this._render();
+      this._hasRendered = false;
+      if (this._hass) this._render();
     }
 
     set hass(hass) {
       this._hass = hass;
-      this._render();
+      if (!this._hasRendered) {
+        this._render();
+        return;
+      }
+      if (this._config.refreshIntervalMs <= 0) return;
+
+      const now = Date.now();
+      if (now - this._lastPassiveRender >= this._config.refreshIntervalMs) {
+        this._render();
+      }
     }
 
     getCardSize() {
@@ -700,8 +815,13 @@
         if (
           this._filters.production
           && this._filters.production !== "all"
-          && row.raw.status !== this._filters.production
-        ) return false;
+        ) {
+          if (
+            this._filters.production === "off"
+            && ["no_grid", "unreachable", "unknown"].includes(row.raw.status)
+          ) return true;
+          if (row.raw.status !== this._filters.production) return false;
+        }
         return true;
       });
     }
@@ -736,7 +856,7 @@
         <style>${css}</style>
         <ha-card>
           <h2 class="title">${this._escape(this._title())}</h2>
-          ${this._toolbar(rows)}
+          ${this._config.showFilters ? this._toolbar(rows) : ""}
           <p class="summary">${filtered.length} matched of ${rows.length}</p>
           <div class="tableWrap">
             ${visible.length ? this._table(visible) : '<div class="empty">No matching Hoymiles entities</div>'}
@@ -744,6 +864,8 @@
           ${this._pager(filtered.length, pageCount)}
         </ha-card>
       `;
+      this._hasRendered = true;
+      this._lastPassiveRender = Date.now();
       this._bindEvents();
     }
 
@@ -757,7 +879,7 @@
         ? this._select("status", "Status", ["online", "offline", "unknown"])
         : "";
       const productionFilter = this._kind === "panels"
-        ? this._select("production", "Production", ["all", "producing", "zero", "off"])
+        ? this._select("production", "Production", PANEL_PRODUCTION_FILTERS)
         : "";
 
       return `
@@ -803,6 +925,7 @@
         offline: "Offline",
         unknown: "Unknown",
         producing: "Producing",
+        online_zero: "Online, no production",
         zero: "Zero production",
         off: "Off",
         all: "All",
