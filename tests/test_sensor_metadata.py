@@ -51,6 +51,14 @@ def test_metadata_sensors_attach_to_expected_devices() -> None:
     assert by_object_id["dtu_4121a01953c8_location"].native_value == "Plant room"
     assert by_object_id["inverter_1421a01a4ff5_location"].native_value == "53"
     assert by_object_id["inverter_1421a01a4ff5_phase"].native_value == "2"
+    assert (
+        by_object_id["dtu_4121a01953c8_location"]._attr_entity_id
+        == "sensor.dtu_4121a01953c8_location"
+    )
+    assert (
+        by_object_id["inverter_1421a01a4ff5_location"]._attr_entity_id
+        == "sensor.inverter_1421a01a4ff5_location"
+    )
     assert by_object_id["dtu_4121a01953c8_location"].device_info[
         "identifiers"
     ] == {(DOMAIN, DTU_SERIAL_NUMBER)}

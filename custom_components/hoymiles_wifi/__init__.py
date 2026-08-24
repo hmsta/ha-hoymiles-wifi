@@ -313,7 +313,22 @@ def _configured_inverter_serials(data: dict[str, Any]) -> set[str]:
 
 def _stored_metadata_unique_ids(entry_id: str, data: dict[str, Any]) -> set[str]:
     """Return metadata entity unique IDs backed by structured metadata storage."""
-    unique_ids: set[str] = set()
+    return set(_stored_metadata_entity_ids(entry_id, data))
+
+
+def _stored_metadata_entity_ids(
+    entry_id: str, data: dict[str, Any]
+) -> dict[str, str]:
+    """Return metadata unique IDs and their canonical entity IDs."""
+    entity_ids: dict[str, str] = {}
+
+    dtu_serial_number = str(data.get(CONF_DTU_SERIAL_NUMBER) or "").strip()
+    if dtu_serial_number and str(data.get(CONF_DTU_LOCATION) or "").strip():
+        unique_id = _metadata_unique_id(entry_id, dtu_serial_number, "location")
+        entity_ids[unique_id] = (
+            f"{SENSOR_DOMAIN}.dtu_{normalize_serial(dtu_serial_number)}_location"
+        )
+
     inverter_serials = _configured_inverter_serials(data)
 
     locations = data.get(CONF_INVERTER_LOCATIONS)
@@ -335,11 +350,49 @@ def _stored_metadata_unique_ids(entry_id: str, data: dict[str, Any]) -> set[str]
 
     for serial in inverter_serials:
         if locations.get(serial):
-            unique_ids.add(_metadata_unique_id(entry_id, serial, "location"))
+            unique_id = _metadata_unique_id(entry_id, serial, "location")
+            entity_ids[unique_id] = f"{SENSOR_DOMAIN}.inverter_{serial}_location"
         if phases.get(serial):
-            unique_ids.add(_metadata_unique_id(entry_id, serial, "phase"))
+            unique_id = _metadata_unique_id(entry_id, serial, "phase")
+            entity_ids[unique_id] = f"{SENSOR_DOMAIN}.inverter_{serial}_phase"
 
-    return unique_ids
+    return entity_ids
+
+
+def _repair_metadata_entity_ids(hass: HomeAssistant, entry_id: str, data: dict) -> None:
+    """Rename generated metadata entities to canonical serial-based entity IDs."""
+    entity_registry = er.async_get(hass)
+    for unique_id, canonical_entity_id in _stored_metadata_entity_ids(
+        entry_id, data
+    ).items():
+        entity_id = entity_registry.async_get_entity_id(
+            SENSOR_DOMAIN, DOMAIN, unique_id
+        )
+        if not entity_id or entity_id == canonical_entity_id:
+            continue
+
+        conflict = entity_registry.async_get(canonical_entity_id)
+        if conflict is not None and conflict.unique_id != unique_id:
+            _LOGGER.warning(
+                "Cannot rename Hoymiles metadata entity %s to %s because %s "
+                "already uses the canonical entity ID",
+                entity_id,
+                canonical_entity_id,
+                conflict.unique_id,
+            )
+            continue
+
+        try:
+            entity_registry.async_update_entity(
+                entity_id, new_entity_id=canonical_entity_id
+            )
+        except ValueError as err:
+            _LOGGER.warning(
+                "Cannot rename Hoymiles metadata entity %s to %s: %s",
+                entity_id,
+                canonical_entity_id,
+                err,
+            )
 
 
 def _legacy_metadata_unique_ids(entry_id: str, data: dict[str, Any]) -> set[str]:
@@ -384,6 +437,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     """Set up this integration using UI."""
 
     await _async_register_frontend(hass)
+    _repair_metadata_entity_ids(hass, config_entry.entry_id, config_entry.data)
 
     hass.data.setdefault(DOMAIN, {})
     shared_meter_coordinator = hass.data[DOMAIN].get(HASS_SHARED_METER_COORDINATOR)
