@@ -178,12 +178,13 @@
       color: var(--primary-color);
     }
 
-    tbody tr {
-      cursor: pointer;
-    }
-
     tbody tr:hover {
       background: rgba(var(--rgb-primary-color, 3, 169, 244), 0.06);
+    }
+
+    td[data-entity-id],
+    td[data-device-entity-id] {
+      cursor: pointer;
     }
 
     .muted {
@@ -504,14 +505,27 @@
       return this._dtuRows();
     }
 
+    _firstKnownEntity(entityIds) {
+      return entityIds.find((entityId) => (
+        this._hass.states[entityId]
+        || (this._hass.entities && this._hass.entities[entityId])
+      )) || entityIds[0];
+    }
+
     _inverterRows() {
       return discoverInverterSerials(this._hass).map((serial) => {
         const state = inverterState(this._hass, serial);
+        const deviceEntityId = this._firstKnownEntity([
+          inverterEntity(serial, "ac_power"),
+          inverterEntity(serial, "signal_strength"),
+          inverterEntity(serial, "location"),
+        ]);
         const row = {
           id: serial,
           kind: "inverter",
           serial,
           entityId: inverterEntity(serial, "ac_power"),
+          deviceEntityId,
           search: "",
           cells: {
             inverter: serial.toUpperCase(),
@@ -532,6 +546,15 @@
             temperature: numericState(this._hass, inverterEntity(serial, "temperature")),
             rssi: numericState(this._hass, inverterEntity(serial, "signal_strength")),
           },
+          entities: {
+            location: inverterEntity(serial, "location"),
+            phase: inverterEntity(serial, "phase"),
+            state: inverterEntity(serial, "grid_voltage"),
+            ac_power: inverterEntity(serial, "ac_power"),
+            ac_current: inverterEntity(serial, "ac_current"),
+            temperature: inverterEntity(serial, "temperature"),
+            rssi: inverterEntity(serial, "signal_strength"),
+          },
         };
         return this._populateConfiguredColumns(row);
       }).map((row) => ({ ...row, search: this._rowSearch(row) }));
@@ -540,12 +563,18 @@
     _panelRows() {
       return discoverPanelRefs(this._hass).map(({ serial, port }) => {
         const status = panelStatus(this._hass, serial, port, this._config.offThresholdWatts);
+        const deviceEntityId = this._firstKnownEntity([
+          inverterEntity(serial, "ac_power"),
+          inverterEntity(serial, "signal_strength"),
+          portEntity(serial, port, "dc_power"),
+        ]);
         const row = {
           id: `${serial}-${port}`,
           kind: "panels",
           serial,
           port,
           entityId: portEntity(serial, port, "dc_power"),
+          deviceEntityId,
           search: "",
           cells: {
             inverter: serial.toUpperCase(),
@@ -568,6 +597,16 @@
             dc_current: numericState(this._hass, portEntity(serial, port, "dc_current")),
             dc_daily_energy: numericState(this._hass, portEntity(serial, port, "dc_daily_energy")),
           },
+          entities: {
+            location: inverterEntity(serial, "location"),
+            phase: inverterEntity(serial, "phase"),
+            status: portEntity(serial, port, "dc_power"),
+            port: portEntity(serial, port, "dc_power"),
+            dc_power: portEntity(serial, port, "dc_power"),
+            dc_voltage: portEntity(serial, port, "dc_voltage"),
+            dc_current: portEntity(serial, port, "dc_current"),
+            dc_daily_energy: portEntity(serial, port, "dc_daily_energy"),
+          },
         };
         return this._populateConfiguredColumns(row);
       }).map((row) => ({ ...row, search: this._rowSearch(row) }));
@@ -576,11 +615,18 @@
     _dtuRows() {
       return discoverDtuSerials(this._hass).map((serial) => {
         const status = dtuStatus(this._hass, serial);
+        const deviceEntityId = this._firstKnownEntity([
+          dtuBinary(serial),
+          dtuSensor(serial, "ac_power"),
+          dtuSensor(serial, "signal_strength"),
+          dtuSensor(serial, "location"),
+        ]);
         const row = {
           id: serial,
           kind: "dtu",
           serial,
           entityId: dtuBinary(serial),
+          deviceEntityId,
           search: "",
           cells: {
             dtu: serial.toUpperCase(),
@@ -595,6 +641,13 @@
             location: stateValue(this._hass, dtuSensor(serial, "location")) || "",
             ac_power: numericState(this._hass, dtuSensor(serial, "ac_power")),
             daily_energy: numericState(this._hass, dtuSensor(serial, "ac_daily_energy")),
+          },
+          entities: {
+            location: dtuSensor(serial, "location"),
+            status: dtuBinary(serial),
+            ip: dtuSensor(serial, "ip_address"),
+            ac_power: dtuSensor(serial, "ac_power"),
+            daily_energy: dtuSensor(serial, "ac_daily_energy"),
           },
         };
         return this._populateConfiguredColumns(row);
@@ -613,6 +666,8 @@
         row.cells[key] = roundDisplay(this._hass, entityId);
         const raw = numericState(this._hass, entityId);
         row.raw[key] = raw == null ? stateValue(this._hass, entityId) || "" : raw;
+        row.entities = row.entities || {};
+        row.entities[key] = entityId;
       }
       return row;
     }
@@ -770,9 +825,9 @@
           </thead>
           <tbody>
             ${rows.map((row) => `
-              <tr data-entity-id="${this._escapeAttr(row.entityId)}">
+              <tr>
                 ${this._config.columns.map((key) => `
-                  <td data-label="${this._escapeAttr(labelForColumn(key))}">
+                  <td data-label="${this._escapeAttr(labelForColumn(key))}"${this._cellTargetAttrs(row, key)}>
                     ${this._cell(row, key)}
                   </td>
                 `).join("")}
@@ -781,6 +836,14 @@
           </tbody>
         </table>
       `;
+    }
+
+    _cellTargetAttrs(row, key) {
+      if ((key === "inverter" || key === "dtu") && row.deviceEntityId) {
+        return ` data-device-entity-id="${this._escapeAttr(row.deviceEntityId)}"`;
+      }
+      const entityId = row.entities && row.entities[key];
+      return entityId ? ` data-entity-id="${this._escapeAttr(entityId)}"` : "";
     }
 
     _cell(row, key) {
@@ -860,17 +923,32 @@
         });
       }
 
-      for (const row of root.querySelectorAll("tbody tr[data-entity-id]")) {
-        row.addEventListener("click", (event) => {
-          const entityId = event.currentTarget.dataset.entityId;
-          if (!entityId || !this._hass.states[entityId]) return;
-          this.dispatchEvent(new CustomEvent("hass-more-info", {
-            bubbles: true,
-            composed: true,
-            detail: { entityId },
-          }));
+      for (const cell of root.querySelectorAll("tbody td[data-entity-id], tbody td[data-device-entity-id]")) {
+        cell.addEventListener("click", (event) => {
+          const target = event.currentTarget;
+          const deviceEntityId = target.dataset.deviceEntityId;
+          if (deviceEntityId && this._openDeviceForEntity(deviceEntityId)) return;
+          this._openMoreInfo(target.dataset.entityId || deviceEntityId);
         });
       }
+    }
+
+    _openMoreInfo(entityId) {
+      if (!entityId || !this._hass.states[entityId]) return;
+      this.dispatchEvent(new CustomEvent("hass-more-info", {
+        bubbles: true,
+        composed: true,
+        detail: { entityId },
+      }));
+    }
+
+    _openDeviceForEntity(entityId) {
+      const registryEntry = this._hass && this._hass.entities ? this._hass.entities[entityId] : null;
+      const deviceId = registryEntry && registryEntry.device_id;
+      if (!deviceId) return false;
+      window.history.pushState(null, "", `/config/devices/device/${encodeURIComponent(deviceId)}`);
+      window.dispatchEvent(new Event("location-changed"));
+      return true;
     }
 
     _escape(value) {
