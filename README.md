@@ -1,16 +1,17 @@
 # Hoymiles for Home Assistant
 
-This custom component integrates Hoymiles DTUs, HMS-XXXXW microinverters and hybrid inverters into Home Assistant, providing live inverter data.
-It uses the [hoymiles-wifi](https://github.com/suaveolent/hoymiles-wifi) Python library to communicate directly with the devices over your local network — no cloud connection required.
+This repository is a fork of [suaveolent/ha-hoymiles-wifi](https://github.com/suaveolent/ha-hoymiles-wifi). The original Home Assistant integration and parts of the original README text were written by [suaveolent](https://github.com/suaveolent).
+
+The integration connects Hoymiles DTUs, HMS/HMT microinverters, and hybrid inverters to Home Assistant with live local data. It uses the [hoymiles-wifi](https://github.com/suaveolent/hoymiles-wifi) Python library to communicate directly with the devices on your local network, with no Hoymiles cloud connection required.
+
+This fork keeps the original local communication model and adds changes focused on larger Home Assistant installations: multi-DTU ownership handling, shared meter data, serial-based device names, layout metadata, a Lovelace layout map, and native table cards.
 
 > [!NOTE]
-> Disclaimer: This library is not affiliated with Hoymiles. It is an independent project developed to provide tools for interacting with Hoymiles DTUs and Hoymiles HMS-XXXXW series micro-inverters featuring integrated WiFi DTU. Any trademarks or product names mentioned are the property of their respective owners.
-
-[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/suaveolent)
+> This project is not affiliated with Hoymiles. Hoymiles trademarks and product names belong to their respective owners.
 
 ## Changes Made in This Fork
 
-This fork keeps the upstream Hoymiles integration behavior, with a few local changes for larger multi-DTU installations.
+This fork keeps the upstream Hoymiles integration behavior, but adds several features for larger multi-DTU and multi-inverter installations.
 
 ### Meter Type Override
 
@@ -65,6 +66,22 @@ For newly created devices, this should also make generated entity IDs easier to 
 
 Existing Home Assistant device and entity registry entries may keep their current names because Home Assistant stores registry names separately.
 
+### Layout Metadata Entities
+
+The Reconfigure flow can store optional site metadata:
+
+- `layout_json`: the Hoymiles cloud `v3_g_c` layout JSON.
+- `dtu_location`: a text location for the DTU config entry.
+- `inverter_phase_map`: one `serial=phase` line per inverter. Phases `1`, `2`, `3`, `L1`, `L2`, and `L3` are accepted.
+
+When metadata is configured, the integration creates diagnostic sensors attached to the existing Hoymiles devices:
+
+- `sensor.inverter_<serial>_location`
+- `sensor.inverter_<serial>_phase`
+- `sensor.dtu_<serial>_location`
+
+Inverter locations are derived from Hoymiles layout group names. Row suffixes are stripped, so groups like `53-a` and `53-b` both become location `53`. Empty metadata fields do not create metadata entities.
+
 ### Noisy Diagnostics Disabled by Default
 
 Some diagnostic entities are disabled by default because they are often useless or report `unknown`:
@@ -87,16 +104,16 @@ The underlying Hoymiles data keys and Home Assistant entity unique IDs are uncha
 
 ### Home Assistant Energy Dashboard
 
-For a setup where the Hoymiles meter reports signed grid power and negative power means export, the Home Assistant Energy Dashboard can be configured like this:
+For a setup where the Hoymiles meter reports signed grid power and negative power means export, the Home Assistant Energy Dashboard can be configured like this. Replace the example serial placeholders with the actual entity IDs from your Home Assistant entity registry:
 
-- Solar production energy: `sensor.dtu_ac_daily_energy`
-- Solar production power: `sensor.dtu_ac_power`
-- Energy imported from grid: `sensor.meter_energy_total_consumed`
-- Energy exported to grid: `sensor.meter_energy_total_power`
+- Solar production energy: `sensor.dtu_<serial>_ac_daily_energy`
+- Solar production power: `sensor.dtu_<serial>_ac_power`
+- Energy imported from grid: `sensor.meter_<serial>_energy_imported`
+- Energy exported to grid: `sensor.meter_<serial>_energy_exported`
 - Type of power measurement: `INVERTED`
-- Power measurement: `sensor.meter_phase_total_power`
+- Power measurement: `sensor.meter_<serial>_phase_total_power`
 
-Home Assistant may create an inverted helper entity such as `sensor.meter_phase_total_power_inverted` from that power measurement setup.
+Home Assistant may create an inverted helper entity from that power measurement setup.
 
 ## Supported Devices
 
@@ -146,13 +163,10 @@ The custom component was successfully tested with:
 
 9. Click "ADD INTEGRATION" and select the `Hoymiles` integration.
 
-10. Insert IP address of hoymiles DTUBI-xxxx in field Host and click on SUBMIT
+10. Enter the DTU or inverter host name/IP address in the `Host` field and click `SUBMIT`.
 
 > [!NOTE]
-> Sometimes the necessary lib
-> (https://github.com/suaveolent/hoymiles-wifi) is not correctly
-> installed. In this case you need to manually install the library by
-> running the `pip install hoymiles-wifi` command yourself.
+> Home Assistant should install the pinned `hoymiles-wifi` Python requirement from the integration manifest. If that fails in your environment, use the Docker workaround below or install the dependency manually.
 
 ### Option 2: Manual Installation
 
@@ -160,11 +174,9 @@ The custom component was successfully tested with:
 
 2. Extract the ZIP file.
 
-3. Copy the entire `custom_components/hoymiles-wifi` directory to your Home Assistant
+3. Copy the entire `custom_components/hoymiles_wifi` directory to your Home Assistant `custom_components` directory.
 
-4. Install the python requirements
-
-5. Restart your Home Assistant instance to apply the changes.
+4. Restart your Home Assistant instance to install the integration requirement and apply the changes.
 
 ### Docker Users: Workaround for HTTP 500 Error
 
@@ -197,29 +209,44 @@ Configuration is done in the UI.
 
 3. `Meter energy consistency tolerance`: Maximum allowed difference between a meter total energy counter and the sum of its phase energy counters before the whole meter sample from that DTU poll is rejected. The default is `1000` raw meter units.
 
+### Optional Reconfigure Metadata
+
+After the DTU is configured, use Reconfigure to add optional metadata used by the layout map and table cards:
+
+- `Hoymiles layout JSON`: paste the full Hoymiles cloud `v3_g_c` layout JSON.
+- `DTU location`: a short location label for this DTU.
+- `Inverter phase map`: one inverter phase mapping per line.
+
+Phase map example:
+
+```text
+1421a01a4ff5=1
+1421a01a5294=L2
+1421a01a53da=3
+```
+
+Serial numbers are normalized to lowercase. Reconfiguring with an empty metadata field removes the corresponding generated metadata entities after reload.
+
 ## Hoymiles Layout Card
 
-This fork includes an experimental Lovelace custom card for rendering the Hoymiles cloud layout JSON on top of the cloud background image.
+This fork includes a Lovelace custom card for rendering the Hoymiles cloud layout JSON on top of the cloud background image.
 
-Add the dashboard resource after installing or updating the integration:
+The integration auto-registers the frontend resources with a cache-busted URL. If your Home Assistant setup does not pick them up automatically, add the dashboard resources manually:
 
 ```yaml
 url: /hoymiles_wifi_static/hoymiles-layout-card.js
 type: module
 ```
 
-Then add a manual Lovelace card and paste the Hoymiles `v3_g_c` response as `layout`:
+```yaml
+url: /hoymiles_wifi_static/hoymiles-table-cards.js
+type: module
+```
+
+The preferred setup is to store `layout_json` in the integration Reconfigure flow, then use a compact card config:
 
 ```yaml
 type: custom:hoymiles-layout-card
-layout:
-  status: "0"
-  message: success
-  data:
-    k_101:
-      # paste Hoymiles image metadata here
-    k_100:
-      # paste Hoymiles array data here
 max_watts: 300
 off_threshold_watts: 1
 height: 80vh
@@ -235,7 +262,16 @@ rssi_ok_dbm: -75
 rssi_bad_dbm: -90
 ```
 
-The card does not expose one selector per panel. It reads the panel positions from the pasted Hoymiles JSON and automatically matches integration entities named like:
+If you have more than one Hoymiles config entry with stored layout JSON, add `entry_id` to select the entry:
+
+```yaml
+type: custom:hoymiles-layout-card
+entry_id: your_config_entry_id
+```
+
+For debugging or one-off layouts, a pasted `layout:` value is still supported and takes precedence over the stored Reconfigure layout.
+
+The card does not expose one selector per panel. It reads the panel positions from the Hoymiles JSON and automatically matches integration entities named like:
 
 - `sensor.inverter_1421a01a4ff5_port_1_dc_power`
 - `sensor.inverter_1421a01a4ff5_port_1_dc_daily_energy`
@@ -249,6 +285,52 @@ Set `height` to override the default aspect-ratio sizing, for example `height: 8
 
 The `Replay` button switches the `W` view from live values to Home Assistant history for the current day. History is loaded only when replay is opened, compressed to hourly samples by default, and cached in the browser. The default replay window is 06:00-19:00. Set `show_replay_control: false` to hide the button, adjust `replay_step_seconds` for finer/coarser jumps, or set `replay_start_hour` / `replay_end_hour` to change the daily window. Replay hours accept values like `6`, `"06:00"`, or `"6am"`.
 
+## Hoymiles Table Cards
+
+This fork also includes native Lovelace table cards so large installations do not need custom scripts, generated YAML maps, or `custom:flex-table-card` dashboards.
+
+```yaml
+type: custom:hoymiles-inverter-card
+```
+
+```yaml
+type: custom:hoymiles-panels-card
+```
+
+```yaml
+type: custom:hoymiles-dtu-card
+```
+
+The table cards read directly from `hass.states`. They discover Hoymiles entities by the integration's serial-based entity IDs and use the metadata sensors from Reconfigure for location and phase filters.
+
+Available table features:
+
+- search
+- location and phase filters
+- state/status filters
+- sortable columns
+- page size selector
+- pagination
+- mobile-friendly stacked rows
+- click a row to open the Home Assistant entity more-info dialog
+
+Default inverter columns are inverter, location, phase, state, AC power, AC current, temperature, and RSSI. Default panel columns are inverter, location, phase, port, DC power, DC voltage, DC current, and daily energy. Default DTU columns are DTU, location, status, IP, power, and daily energy.
+
+Columns can be customized with short suffix names:
+
+```yaml
+type: custom:hoymiles-panels-card
+columns:
+  - inverter
+  - location
+  - phase
+  - port
+  - dc_power
+  - dc_daily_energy
+page_size: 50
+production_status: all
+```
+
 ## Screenshots
 
 ![Hoymiles layout map](screenshots/layout-map.png)
@@ -258,7 +340,7 @@ The `Replay` button switches the `W` view from live values to Home Assistant his
 
 ## Caution
 
-Use this custom component responsibly and be aware of potential risks. There are no guarantees provided, and any misuse or incorrect implementation may result in undesirable outcomes. Ensure that your inverter is not compromised during communication.
+This is a custom integration that communicates directly with inverter and DTU endpoints. Test changes carefully, especially write/control features.
 
 ## Known Limitations
 
@@ -266,9 +348,6 @@ Use this custom component responsibly and be aware of potential risks. There are
 > **Update Frequency:** The library may experience limitations in fetching updates, potentially around twice per minute. The inverter firmware may enforce a mandatory wait period of approximately 30 seconds between requests.
 > This issue can be identified when the data returned matches the response from the previous request.
 > If you encounter this, you can try the _experimental_ performance data mode. (Needs to be enabled on each reboot of the DTU.)
-
-> [!NOTE]
-> **Compatibility:** While developed for the HMS-800W-2T inverter, compatibility with other inverters from the series is untested at the time of writing. Exercise caution and conduct thorough testing if using with different inverter models.
 
 ## Attribution
 
