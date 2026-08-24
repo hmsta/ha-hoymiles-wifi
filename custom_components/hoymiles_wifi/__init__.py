@@ -522,6 +522,25 @@ async def async_remove_config_entry_device(
                 shared_meter_coordinator.remove_meter(meter_serial)
         return True
 
+    device_identifiers = {
+        str(identifier).strip()
+        for domain, identifier in device_entry.identifiers
+        if domain == DOMAIN and str(identifier).strip()
+    }
+    active_identifiers = {
+        str(config_entry.data.get(CONF_DTU_SERIAL_NUMBER, "")).strip()
+    }
+    active_identifiers.update(_configured_inverter_serials(config_entry.data))
+    active_identifiers.update(
+        str(meter.get("meter_serial_number", "")).strip()
+        for meter in meters
+        if isinstance(meter, dict)
+    )
+    active_identifiers.discard("")
+
+    if device_identifiers and device_identifiers.isdisjoint(active_identifiers):
+        return True
+
     return False
 
 
