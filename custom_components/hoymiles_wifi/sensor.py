@@ -37,9 +37,12 @@ from hoymiles_wifi.hoymiles import (
 )
 
 from .const import (
+    CONF_DTU_LOCATION,
     CONF_DTU_SERIAL_NUMBER,
     CONF_INVERTERS,
     CONF_HYBRID_INVERTERS,
+    CONF_INVERTER_PHASE_MAP,
+    CONF_LAYOUT_JSON,
     CONF_METERS,
     CONF_PORTS,
     CONF_THREE_PHASE_INVERTERS,
@@ -55,8 +58,15 @@ from .const import (
 )
 from .entity import (
     HoymilesCoordinatorEntity,
+    HoymilesEntity,
     HoymilesEntityDescription,
     DeviceType,
+)
+from .layout_metadata import (
+    LayoutMetadataError,
+    derive_inverter_locations,
+    normalize_serial,
+    parse_inverter_phase_map,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -1229,6 +1239,8 @@ async def async_setup_entry(
     ports = config_entry.data[CONF_PORTS]
     sensors = []
 
+    sensors.extend(_metadata_sensors(config_entry, inverters, ports, hybrid_inverters))
+
     # Real Data Sensors
 
     if inverters or meters:
@@ -1329,6 +1341,108 @@ async def async_setup_entry(
             sensors.extend(sensor_entities)
 
     async_add_entities(sensors)
+
+
+def _metadata_sensors(
+    config_entry: ConfigEntry,
+    inverters: list,
+    ports: list,
+    hybrid_inverters: list,
+) -> list[SensorEntity]:
+    """Build static metadata sensors from stored layout and user mappings."""
+    sensors: list[SensorEntity] = []
+    dtu_serial_number = str(config_entry.data[CONF_DTU_SERIAL_NUMBER])
+
+    dtu_location = str(config_entry.data.get(CONF_DTU_LOCATION) or "").strip()
+    if dtu_location:
+        sensors.append(
+            _metadata_sensor(
+                config_entry,
+                dtu_serial_number,
+                "location",
+                dtu_location,
+                is_dtu_sensor=True,
+            )
+        )
+
+    inverter_serials = _configured_inverter_serials(
+        inverters, ports, hybrid_inverters
+    )
+    locations = _derived_locations(config_entry)
+    phases = _configured_phases(config_entry)
+
+    for serial in sorted(inverter_serials):
+        location = locations.get(serial)
+        if location:
+            sensors.append(
+                _metadata_sensor(config_entry, serial, "location", location)
+            )
+
+        phase = phases.get(serial)
+        if phase:
+            sensors.append(_metadata_sensor(config_entry, serial, "phase", phase))
+
+    return sensors
+
+
+def _metadata_sensor(
+    config_entry: ConfigEntry,
+    serial_number: str,
+    kind: str,
+    value: str,
+    *,
+    is_dtu_sensor: bool = False,
+) -> SensorEntity:
+    """Create one static metadata sensor entity."""
+    description = HoymilesSensorEntityDescription(
+        key=f"metadata[{kind}].{kind}",
+        translation_key=kind,
+        icon="mdi:map-marker" if kind == "location" else "mdi:transmission-tower",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        serial_number=normalize_serial(serial_number),
+        is_dtu_sensor=is_dtu_sensor,
+    )
+    return HoymilesStaticMetadataSensorEntity(config_entry, description, value)
+
+
+def _configured_inverter_serials(
+    inverters: list,
+    ports: list,
+    hybrid_inverters: list,
+) -> set[str]:
+    """Return all configured inverter serials in lower-case form."""
+    serials = {normalize_serial(serial) for serial in inverters}
+    serials.update(
+        normalize_serial(port.get("inverter_serial_number"))
+        for port in ports
+        if isinstance(port, dict)
+    )
+    serials.update(
+        normalize_serial(inverter.get("inverter_serial_number"))
+        for inverter in hybrid_inverters
+        if isinstance(inverter, dict)
+    )
+    return {serial for serial in serials if serial}
+
+
+def _derived_locations(config_entry: ConfigEntry) -> dict[str, str]:
+    """Return layout-derived inverter locations."""
+    try:
+        return derive_inverter_locations(config_entry.data.get(CONF_LAYOUT_JSON))
+    except LayoutMetadataError:
+        _LOGGER.warning("Ignoring invalid stored Hoymiles layout JSON")
+        return {}
+
+
+def _configured_phases(config_entry: ConfigEntry) -> dict[str, str]:
+    """Return manually configured inverter phases."""
+    try:
+        return parse_inverter_phase_map(
+            config_entry.data.get(CONF_INVERTER_PHASE_MAP)
+        )
+    except ValueError:
+        _LOGGER.warning("Ignoring invalid stored Hoymiles inverter phase map")
+        return {}
 
 
 def get_sensors_for_description(
@@ -1796,6 +1910,20 @@ class HoymilesEnergySensorEntity(HoymilesDataSensorEntity, RestoreSensor):
 
         if self.entity_description.reset_at_midnight:
             self.schedule_midnight_reset(reset_sensor_value=False)
+
+
+class HoymilesStaticMetadataSensorEntity(HoymilesEntity, SensorEntity):
+    """Static metadata sensor attached to a Hoymiles device."""
+
+    def __init__(
+        self,
+        config_entry: ConfigEntry,
+        description: HoymilesSensorEntityDescription,
+        native_value: str,
+    ):
+        """Initialize a static metadata sensor."""
+        super().__init__(config_entry, description)
+        self._attr_native_value = native_value
 
 
 class HoymilesSharedMeterMixin:

@@ -11,7 +11,10 @@
           "startup_cooldown": "Startverzögerung (Sekunden)",
           "meter_type": "Zählertyp",
           "meter_energy_consistency_tolerance": "Toleranz für Zähler-Energiekonsistenz",
-          "delete_missing_inverters": "Fehlende Wechselrichter löschen"
+          "delete_missing_inverters": "Fehlende Wechselrichter löschen",
+          "layout_json": "Hoymiles Layout-JSON",
+          "dtu_location": "DTU-Standort",
+          "inverter_phase_map": "Wechselrichter-Phasenzuordnung"
         }
       },
       "reconfigure": {
@@ -24,12 +27,17 @@
           "startup_cooldown": "Startverzögerung (Sekunden)",
           "meter_type": "Zählertyp",
           "meter_energy_consistency_tolerance": "Toleranz für Zähler-Energiekonsistenz",
-          "delete_missing_inverters": "Fehlende Wechselrichter löschen"
+          "delete_missing_inverters": "Fehlende Wechselrichter löschen",
+          "layout_json": "Hoymiles Layout-JSON",
+          "dtu_location": "DTU-Standort",
+          "inverter_phase_map": "Wechselrichter-Phasenzuordnung"
         }
       }
     },
     "error": {
-      "cannot_connect": "Verbindung nicht möglich."
+      "cannot_connect": "Verbindung nicht möglich.",
+      "invalid_layout_json": "Ungültiges Hoymiles Layout-JSON.",
+      "invalid_phase_map": "Ungültige Wechselrichter-Phasenzuordnung. Verwende eine serial=phase Zeile pro Wechselrichter mit Phase 1, 2, 3 oder L1, L2, L3."
     },
     "abort": {
       "already_configured": "Bereits konfiguriert."
@@ -124,6 +132,12 @@
       },
       "signal_strength": {
         "name": "Signalstärke"
+      },
+      "location": {
+        "name": "Standort"
+      },
+      "phase": {
+        "name": "Phase"
       },
       "voltage_phase_A": {
         "name": "Spannung Phase A"

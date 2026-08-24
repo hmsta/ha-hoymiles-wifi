@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 import voluptuous as vol
 
+from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_ID, CONF_TYPE, CONF_URL, Platform
 from homeassistant.core import HomeAssistant
@@ -16,9 +17,12 @@ from homeassistant.helpers.service import SupportsResponse
 from hoymiles_wifi.dtu import DTU
 
 from .const import (
+    CONF_DTU_LOCATION,
     CONF_DTU_SERIAL_NUMBER,
     CONF_HYBRID_INVERTERS,
     CONF_INVERTERS,
+    CONF_INVERTER_PHASE_MAP,
+    CONF_LAYOUT_JSON,
     CONF_METERS,
     CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
     CONF_PORTS,
@@ -49,6 +53,11 @@ from .coordinator import (
     HoymilesEnergyStorageUpdateCoordinator,
 )
 from .entity_migration import async_migrate_entity_unique_ids
+from .layout_metadata import (
+    LayoutMetadataError,
+    derive_inverter_locations,
+    parse_layout_json,
+)
 from .services import async_handle_set_bms_mode
 from .shared_meter import HoymilesSharedMeterCoordinator
 
@@ -58,6 +67,8 @@ PLATFORMS = [Platform.SENSOR, Platform.NUMBER, Platform.BINARY_SENSOR, Platform.
 FRONTEND_DIR = Path(__file__).parent / "frontend"
 FRONTEND_URL = f"/{DOMAIN}_static"
 FRONTEND_CARD_FILENAME = "hoymiles-layout-card.js"
+FRONTEND_TABLE_CARDS_FILENAME = "hoymiles-table-cards.js"
+FRONTEND_CARD_FILENAMES = (FRONTEND_CARD_FILENAME, FRONTEND_TABLE_CARDS_FILENAME)
 FRONTEND_CARD_URL = f"{FRONTEND_URL}/{FRONTEND_CARD_FILENAME}"
 FRONTEND_CARD_RESOURCE_TYPE = "module"
 LOVELACE_DOMAIN = "lovelace"
@@ -92,6 +103,7 @@ SET_BMS_SCHEMA = vol.Schema(
 async def async_setup(hass: HomeAssistant, config: ConfigType):
     """Set up this integration using YAML is not supported."""
     await _async_register_frontend(hass)
+    _async_register_layout_websocket(hass)
     return True
 
 
@@ -163,7 +175,7 @@ async def _async_register_static_frontend(hass: HomeAssistant) -> None:
 
 
 async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
-    """Create or update the Lovelace resource for the layout card."""
+    """Create or update Lovelace resources for bundled Hoymiles cards."""
     resources = await _async_get_lovelace_resources(hass)
     if resources is None:
         _LOGGER.debug("Lovelace resources are unavailable; skipping frontend resource")
@@ -180,20 +192,27 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
 
     await resources.async_get_info()
 
-    resource_url = _frontend_card_resource_url()
+    for filename in FRONTEND_CARD_FILENAMES:
+        await _async_register_lovelace_resource_file(resources, filename)
+
+
+async def _async_register_lovelace_resource_file(resources, filename: str) -> None:
+    """Create or update one Lovelace resource for a frontend bundle."""
+    resource_url = _frontend_card_resource_url(filename)
+    resource_base_url = _frontend_card_url(filename)
     resource_items = resources.async_items() or []
     for item in resource_items:
-        if _resource_base_url(item.get(CONF_URL, "")) != FRONTEND_CARD_URL:
+        if _resource_base_url(item.get(CONF_URL, "")) != resource_base_url:
             continue
 
         resource_id = item.get(CONF_ID)
         if not resource_id:
-            _LOGGER.debug("Lovelace resource for %s has no id", FRONTEND_CARD_URL)
+            _LOGGER.debug("Lovelace resource for %s has no id", resource_base_url)
             return
 
         if (
             item.get(CONF_URL) != resource_url
-            or item.get(CONF_TYPE) != FRONTEND_CARD_RESOURCE_TYPE
+            or _resource_type(item) != FRONTEND_CARD_RESOURCE_TYPE
         ):
             await resources.async_update_item(
                 resource_id,
@@ -237,14 +256,19 @@ def _lovelace_resources_from_data(lovelace_data):
     return getattr(lovelace_data, LOVELACE_RESOURCES, None)
 
 
-def _frontend_card_resource_url() -> str:
-    """Return the cache-busted Lovelace URL for the bundled layout card."""
+def _frontend_card_url(filename: str = FRONTEND_CARD_FILENAME) -> str:
+    """Return the static frontend URL for a bundled card file."""
+    return f"{FRONTEND_URL}/{filename}"
+
+
+def _frontend_card_resource_url(filename: str = FRONTEND_CARD_FILENAME) -> str:
+    """Return the cache-busted Lovelace URL for a bundled card file."""
     try:
-        version = (FRONTEND_DIR / FRONTEND_CARD_FILENAME).stat().st_mtime_ns
+        version = (FRONTEND_DIR / filename).stat().st_mtime_ns
     except OSError:
         version = 0
 
-    return f"{FRONTEND_CARD_URL}?v={version}"
+    return f"{_frontend_card_url(filename)}?v={version}"
 
 
 def _resource_base_url(url: str) -> str:
@@ -252,10 +276,84 @@ def _resource_base_url(url: str) -> str:
     return url.split("?", 1)[0]
 
 
+def _resource_type(item: dict) -> str | None:
+    """Return a Lovelace resource type from old or new storage keys."""
+    return item.get(CONF_TYPE) or item.get(LOVELACE_RESOURCE_TYPE)
+
+
+def _async_register_layout_websocket(hass: HomeAssistant) -> None:
+    """Register the websocket command used by the layout card."""
+    hass.data.setdefault(DOMAIN, {})
+    if hass.data[DOMAIN].get("layout_websocket_registered"):
+        return
+
+    websocket_api.async_register_command(hass, _websocket_get_layout)
+    hass.data[DOMAIN]["layout_websocket_registered"] = True
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/layout",
+        vol.Optional("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def _websocket_get_layout(hass: HomeAssistant, connection, msg):
+    """Return the stored Hoymiles layout JSON for a config entry."""
+    entry_id = msg.get("entry_id")
+    entry = _layout_config_entry(hass, entry_id)
+    if entry is None:
+        connection.send_error(
+            msg["id"],
+            "not_found",
+            "No Hoymiles config entry with stored layout JSON was found",
+        )
+        return
+
+    layout_json = entry.data.get(CONF_LAYOUT_JSON, "")
+    try:
+        layout = parse_layout_json(layout_json)
+        locations = derive_inverter_locations(layout_json)
+    except LayoutMetadataError as err:
+        connection.send_error(msg["id"], "invalid_layout_json", str(err))
+        return
+
+    connection.send_result(
+        msg["id"],
+        {
+            "entry_id": entry.entry_id,
+            "layout": layout,
+            "locations": locations,
+        },
+    )
+
+
+def _layout_config_entry(hass: HomeAssistant, entry_id: str | None):
+    """Return the config entry to use for stored layout websocket requests."""
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if entry_id:
+        return next(
+            (
+                entry
+                for entry in entries
+                if entry.entry_id == entry_id and entry.data.get(CONF_LAYOUT_JSON)
+            ),
+            None,
+        )
+
+    entries_with_layout = [
+        entry for entry in entries if entry.data.get(CONF_LAYOUT_JSON)
+    ]
+    if len(entries_with_layout) == 1:
+        return entries_with_layout[0]
+    return None
+
+
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     """Set up this integration using UI."""
 
     await _async_register_frontend(hass)
+    _async_register_layout_websocket(hass)
 
     hass.data.setdefault(DOMAIN, {})
     shared_meter_coordinator = hass.data[DOMAIN].get(HASS_SHARED_METER_COORDINATOR)
@@ -420,6 +518,9 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         )
         new.setdefault(CONF_IS_ENCRYPTED, False)
         new.setdefault(CONF_ENC_RAND, None)
+        new.setdefault(CONF_LAYOUT_JSON, "")
+        new.setdefault(CONF_DTU_LOCATION, "")
+        new.setdefault(CONF_INVERTER_PHASE_MAP, "")
 
         await async_migrate_entity_unique_ids(hass, config_entry.entry_id, new)
 

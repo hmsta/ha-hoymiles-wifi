@@ -830,13 +830,14 @@
       this._suppressNextEntityClick = false;
       this._pinchStart = null;
       this._resizeObserver = null;
+      this._layoutLoadToken = 0;
       this._renderQueued = false;
       this._valueUpdateQueued = false;
     }
 
     setConfig(config) {
-      if (!config || config.layout == null) {
-        throw new Error("Hoymiles layout card requires a layout config value.");
+      if (!config) {
+        throw new Error("Hoymiles layout card requires a config value.");
       }
 
       const rssiOkDbm = optionalNumber(
@@ -859,7 +860,8 @@
       );
 
       this._config = {
-        layout: maybeJson(config.layout),
+        entryId: config.entry_id ?? config.entryId ?? "",
+        layout: config.layout == null ? null : maybeJson(config.layout),
         values: asObject(config.values),
         entities: this._normalizeEntities(config.entities),
         mode: this._normalizeMode(config.mode),
@@ -938,6 +940,9 @@
       const hadHass = Boolean(this._hass);
       this._hass = hass;
       if (!hadHass) this._entityIndex = null;
+      if (this._config && this._config.layout == null && !this._state.layout) {
+        this._loadLayout();
+      }
       if (!this._updatePanelValues()) this._scheduleRender();
     }
 
@@ -1482,10 +1487,41 @@
     }
 
     _loadLayout() {
+      if (this._config.layout == null) {
+        this._loadStoredLayout();
+        return;
+      }
+
+      this._applyLayout(this._config.layout);
+    }
+
+    async _loadStoredLayout() {
+      if (!this._hass || typeof this._hass.callWS !== "function") {
+        this._showError("Hoymiles layout JSON is not configured yet.");
+        return;
+      }
+
+      const token = ++this._layoutLoadToken;
       try {
-        const layout = typeof this._config.layout === "string"
-          ? JSON.parse(this._config.layout)
-          : this._config.layout;
+        const message = { type: "hoymiles_wifi/layout" };
+        if (this._config.entryId) message.entry_id = this._config.entryId;
+        const result = await this._hass.callWS(message);
+        if (token !== this._layoutLoadToken) return;
+        const layout = maybeJson(result && result.layout);
+        if (!layout) throw new Error("Stored Hoymiles layout JSON is empty");
+        this._config.layout = layout;
+        this._applyLayout(layout);
+      } catch (error) {
+        if (token !== this._layoutLoadToken) return;
+        this._showError(`Could not load stored Hoymiles layout: ${error.message}`);
+      }
+    }
+
+    _applyLayout(configuredLayout) {
+      try {
+        const layout = typeof configuredLayout === "string"
+          ? JSON.parse(configuredLayout)
+          : configuredLayout;
         const image = getImageMeta(layout);
         this._state.layout = layout;
         this._state.imageWidth = Number(image && image.mw) || 2000;

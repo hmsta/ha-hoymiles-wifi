@@ -11,7 +11,10 @@
           "startup_cooldown": "Délai de démarrage (secondes)",
           "meter_type": "Type de compteur",
           "meter_energy_consistency_tolerance": "Tolérance de cohérence énergétique du compteur",
-          "delete_missing_inverters": "Supprimer les onduleurs manquants"
+          "delete_missing_inverters": "Supprimer les onduleurs manquants",
+          "layout_json": "JSON de disposition Hoymiles",
+          "dtu_location": "Emplacement DTU",
+          "inverter_phase_map": "Carte des phases des onduleurs"
         }
       },
       "reconfigure": {
@@ -24,12 +27,17 @@
           "startup_cooldown": "Délai de démarrage (secondes)",
           "meter_type": "Type de compteur",
           "meter_energy_consistency_tolerance": "Tolérance de cohérence énergétique du compteur",
-          "delete_missing_inverters": "Supprimer les onduleurs manquants"
+          "delete_missing_inverters": "Supprimer les onduleurs manquants",
+          "layout_json": "JSON de disposition Hoymiles",
+          "dtu_location": "Emplacement DTU",
+          "inverter_phase_map": "Carte des phases des onduleurs"
         }
       }
     },
     "error": {
-      "cannot_connect": "Échec de la connexion."
+      "cannot_connect": "Échec de la connexion.",
+      "invalid_layout_json": "JSON de disposition Hoymiles invalide.",
+      "invalid_phase_map": "Carte des phases des onduleurs invalide. Utilisez une ligne serial=phase par onduleur, avec les phases 1, 2, 3 ou L1, L2, L3."
     },
     "abort": {
       "already_configured": "Déjà configuré."
@@ -124,6 +132,12 @@
       },
       "signal_strength": {
         "name": "Force du signal"
+      },
+      "location": {
+        "name": "Emplacement"
+      },
+      "phase": {
+        "name": "Phase"
       },
       "voltage_phase_A": {
         "name": "Tension phase A"

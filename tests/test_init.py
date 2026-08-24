@@ -82,7 +82,7 @@ async def test_register_lovelace_resource_creates_cache_busted_module(
     hass.data["lovelace"] = {"resources": resources}
     monkeypatch.setattr(
         "custom_components.hoymiles_wifi._frontend_card_resource_url",
-        lambda: "/hoymiles_wifi_static/hoymiles-layout-card.js?v=123",
+        lambda filename="hoymiles-layout-card.js": f"/hoymiles_wifi_static/{filename}?v=123",
     )
 
     await _async_register_lovelace_resource(hass)
@@ -91,7 +91,11 @@ async def test_register_lovelace_resource_creates_cache_busted_module(
         {
             "url": "/hoymiles_wifi_static/hoymiles-layout-card.js?v=123",
             "res_type": "module",
-        }
+        },
+        {
+            "url": "/hoymiles_wifi_static/hoymiles-table-cards.js?v=123",
+            "res_type": "module",
+        },
     ]
 
 
@@ -111,12 +115,17 @@ async def test_register_lovelace_resource_updates_changed_cache_buster(
     hass.data["lovelace"] = {"resources": resources}
     monkeypatch.setattr(
         "custom_components.hoymiles_wifi._frontend_card_resource_url",
-        lambda: "/hoymiles_wifi_static/hoymiles-layout-card.js?v=123",
+        lambda filename="hoymiles-layout-card.js": f"/hoymiles_wifi_static/{filename}?v=123",
     )
 
     await _async_register_lovelace_resource(hass)
 
-    assert resources.created == []
+    assert resources.created == [
+        {
+            "url": "/hoymiles_wifi_static/hoymiles-table-cards.js?v=123",
+            "res_type": "module",
+        },
+    ]
     assert resources.updated == [
         (
             "existing-resource",

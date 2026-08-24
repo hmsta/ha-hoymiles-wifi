@@ -21,6 +21,9 @@ from custom_components.hoymiles_wifi.const import (
     CONF_IS_ENCRYPTED,
     CONF_ENC_RAND,
     CONF_TIMEOUT,
+    CONF_DTU_LOCATION,
+    CONF_INVERTER_PHASE_MAP,
+    CONF_LAYOUT_JSON,
     DEFAULT_STARTUP_COOLDOWN_SECONDS,
     DEFAULT_METER_ENERGY_CONSISTENCY_TOLERANCE,
     DEFAULT_TIMEOUT_SECONDS,
@@ -30,6 +33,7 @@ from custom_components.hoymiles_wifi.const import (
 )
 from custom_components.hoymiles_wifi.config_flow import (
     _detected_inverter_serials,
+    _metadata_entity_unique_ids,
     _remove_claimed_inverters_from_data,
 )
 from custom_components.hoymiles_wifi.error import CannotConnect
@@ -75,6 +79,9 @@ MOCK_DATA_RESULT = {
     CONF_ENC_RAND: "",
     CONF_TIMEOUT: DEFAULT_TIMEOUT_SECONDS,
     CONF_STARTUP_COOLDOWN: DEFAULT_STARTUP_COOLDOWN_SECONDS,
+    CONF_LAYOUT_JSON: "",
+    CONF_DTU_LOCATION: "",
+    CONF_INVERTER_PHASE_MAP: "",
     CONF_METER_ENERGY_CONSISTENCY_TOLERANCE: (
         DEFAULT_METER_ENERGY_CONSISTENCY_TOLERANCE
     ),
@@ -193,6 +200,27 @@ def test_detected_inverter_serials_collects_all_device_shapes() -> None:
         INVERTER_B_SERIAL_NUMBER,
         THREE_PHASE_INVERTER_SERIAL_NUMBER,
         HYBRID_INVERTER_SERIAL_NUMBER,
+    }
+
+
+def test_metadata_entity_unique_ids_follow_generated_sensor_shape() -> None:
+    """Test metadata entity unique IDs are derived from stored metadata."""
+    layout_json = (
+        '{"data":{"k_100":{"pls":[{"iid":1,"n":"53-a"}],'
+        f'"emts":[{{"lid":1,"sn":"{INVERTER_A_SERIAL_NUMBER.upper()}"}}]}}}}'
+    )
+    data = {
+        **MOCK_DATA_RESULT,
+        CONF_DTU_LOCATION: "garage",
+        CONF_LAYOUT_JSON: layout_json,
+        CONF_INVERTER_PHASE_MAP: f"{INVERTER_A_SERIAL_NUMBER.upper()}=L2",
+        CONF_INVERTERS: [INVERTER_A_SERIAL_NUMBER.upper()],
+    }
+
+    assert _metadata_entity_unique_ids("entry-a", data) == {
+        f"hoymiles_entry-a_{DTU_TEST_SERIAL_NUMBER}_metadata.location",
+        f"hoymiles_entry-a_{INVERTER_A_SERIAL_NUMBER}_metadata.location",
+        f"hoymiles_entry-a_{INVERTER_A_SERIAL_NUMBER}_metadata.phase",
     }
 
 
@@ -398,6 +426,97 @@ async def test_reconfigure_keeps_own_meter(hass: HomeAssistant) -> None:
     assert entry.data[CONF_METERS] == [
         {"meter_serial_number": METER_SERIAL_NUMBER, "device_type": 1}
     ]
+
+
+async def test_reconfigure_stores_layout_and_metadata(
+    hass: HomeAssistant,
+) -> None:
+    """Test valid metadata is stored and phase mappings are normalized."""
+
+    entry = _add_config_entry(
+        hass,
+        entry_id="dtu-a",
+        dtu_serial_number=DTU_TEST_SERIAL_NUMBER,
+    )
+    layout_json = '{"data":{"k_100":{"pls":[],"emts":[]},"k_101":{}}}'
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "entry_id": entry.entry_id,
+        },
+    )
+
+    with (
+        patch.object(hass.config_entries, "async_reload", return_value=True),
+        patch(
+            "custom_components.hoymiles_wifi.config_flow.async_get_config_entry_data_for_host",
+            new=AsyncMock(
+                return_value=_discovered_config_data(
+                    dtu_serial_number=DTU_TEST_SERIAL_NUMBER
+                )
+            ),
+        ),
+    ):
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                **MOCK_DATA_STEP,
+                CONF_LAYOUT_JSON: layout_json,
+                CONF_DTU_LOCATION: "53",
+                CONF_INVERTER_PHASE_MAP: "1421A01A4FF5=L1\n1421a01a5294=2",
+            },
+        )
+    await hass.async_block_till_done()
+
+    assert result2["type"] == FlowResultType.ABORT
+    assert result2["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_LAYOUT_JSON] == layout_json
+    assert entry.data[CONF_DTU_LOCATION] == "53"
+    assert entry.data[CONF_INVERTER_PHASE_MAP] == (
+        "1421a01a4ff5=1\n1421a01a5294=2"
+    )
+
+
+async def test_reconfigure_rejects_invalid_metadata_without_connecting(
+    hass: HomeAssistant,
+) -> None:
+    """Test invalid metadata returns field errors before DTU discovery."""
+
+    entry = _add_config_entry(
+        hass,
+        entry_id="dtu-a",
+        dtu_serial_number=DTU_TEST_SERIAL_NUMBER,
+    )
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "entry_id": entry.entry_id,
+        },
+    )
+
+    with patch(
+        "custom_components.hoymiles_wifi.config_flow.async_get_config_entry_data_for_host",
+        new=AsyncMock(),
+    ) as mock_discovery:
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                **MOCK_DATA_STEP,
+                CONF_LAYOUT_JSON: "{",
+                CONF_INVERTER_PHASE_MAP: "1421a01a4ff5=4",
+            },
+        )
+
+    assert result2["type"] == FlowResultType.FORM
+    assert result2["errors"] == {
+        CONF_LAYOUT_JSON: "invalid_layout_json",
+        CONF_INVERTER_PHASE_MAP: "invalid_phase_map",
+    }
+    mock_discovery.assert_not_awaited()
 
 
 async def test_meter_type_override_applies_before_duplicate_filter(
