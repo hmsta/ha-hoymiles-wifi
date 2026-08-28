@@ -20,6 +20,7 @@ from .const import (
     CONF_INVERTERS,
     CONF_THREE_PHASE_INVERTERS,
     DOMAIN,
+    HASS_APP_INFO_COORDINATOR,
     HASS_DATA_COORDINATOR,
     HASS_DTU,
 )
@@ -88,6 +89,7 @@ async def async_setup_entry(
     hass_data = hass.data[DOMAIN][config_entry.entry_id]
     dtu = hass_data[HASS_DTU]
     data_coordinator = hass_data.get(HASS_DATA_COORDINATOR)
+    app_info_coordinator = hass_data.get(HASS_APP_INFO_COORDINATOR)
     dtu_serial_number = config_entry.data[CONF_DTU_SERIAL_NUMBER]
     single_phase_inverters = config_entry.data.get(CONF_INVERTERS, [])
     three_phase_inverters = config_entry.data.get(CONF_THREE_PHASE_INVERTERS, [])
@@ -106,7 +108,11 @@ async def async_setup_entry(
             )
             buttons.append(
                 HoymilesButtonEntity(
-                    config_entry, updated_description, dtu, data_coordinator
+                    config_entry,
+                    updated_description,
+                    dtu,
+                    data_coordinator,
+                    app_info_coordinator,
                 )
             )
         else:
@@ -132,11 +138,13 @@ class HoymilesButtonEntity(HoymilesEntity, ButtonEntity):
         description: HoymilesButtonEntityDescription,
         dtu: DTU,
         data_coordinator: HoymilesDataUpdateCoordinator | None = None,
+        app_info_coordinator: HoymilesDataUpdateCoordinator | None = None,
     ) -> None:
         """Initialize the HoymilesButtonEntity."""
         super().__init__(config_entry, description)
         self._dtu = dtu
         self._data_coordinator = data_coordinator
+        self._app_info_coordinator = app_info_coordinator
 
     async def async_press(self) -> None:
         """Press the button."""
@@ -145,6 +153,8 @@ class HoymilesButtonEntity(HoymilesEntity, ButtonEntity):
             if self._data_coordinator is None:
                 raise HomeAssistantError("No real-data coordinator is available")
             await self._data_coordinator.async_request_refresh()
+            if self._app_info_coordinator is not None:
+                await self._app_info_coordinator.async_request_refresh()
             return
 
         if hasattr(self._dtu, self.entity_description.action) and callable(

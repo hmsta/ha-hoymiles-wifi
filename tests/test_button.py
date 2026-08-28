@@ -12,13 +12,14 @@ from custom_components.hoymiles_wifi.const import (
     CONF_INVERTERS,
     CONF_THREE_PHASE_INVERTERS,
     DOMAIN,
+    HASS_APP_INFO_COORDINATOR,
     HASS_DATA_COORDINATOR,
     HASS_DTU,
 )
 
 
 async def test_force_update_button_requests_real_data_refresh() -> None:
-    """Test the DTU force-update button refreshes the real-data coordinator."""
+    """Test the DTU force-update button refreshes real-data and app-info."""
 
     class FakeCoordinator:
         def __init__(self) -> None:
@@ -32,6 +33,7 @@ async def test_force_update_button_requests_real_data_refresh() -> None:
         data={CONF_DTU_SERIAL_NUMBER: "4121a01953c8"},
     )
     coordinator = FakeCoordinator()
+    app_info_coordinator = FakeCoordinator()
     entity = HoymilesButtonEntity(
         config_entry,
         HoymilesButtonEntityDescription(
@@ -43,11 +45,13 @@ async def test_force_update_button_requests_real_data_refresh() -> None:
         ),
         dtu=object(),
         data_coordinator=coordinator,
+        app_info_coordinator=app_info_coordinator,
     )
 
     await entity.async_press()
 
     assert coordinator.refresh_count == 1
+    assert app_info_coordinator.refresh_count == 1
 
 
 async def test_setup_entry_adds_force_update_button_for_meter_only_entry() -> None:
@@ -66,6 +70,7 @@ async def test_setup_entry_adds_force_update_button_for_meter_only_entry() -> No
                 "entry-a": {
                     HASS_DTU: object(),
                     HASS_DATA_COORDINATOR: object(),
+                    HASS_APP_INFO_COORDINATOR: object(),
                 }
             }
         }
