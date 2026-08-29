@@ -68,6 +68,7 @@
     rssi: "RSSI",
     ip: "IP",
     ip_address: "IP",
+    power_limit: "Power limit",
     signal_strength: "RSSI",
     grid_voltage: "Grid voltage",
   };
@@ -405,6 +406,10 @@
 
   function dtuBinary(serial) {
     return `binary_sensor.dtu_${serial}_connectivity`;
+  }
+
+  function dtuNumber(serial, suffix) {
+    return `number.dtu_${serial}_${suffix}`;
   }
 
   function stateBadge(value, label) {
@@ -815,6 +820,7 @@
       const suffix = (ENTITY_SUFFIX_ALIASES[row.kind] && ENTITY_SUFFIX_ALIASES[row.kind][key]) || key;
       if (row.kind === "inverter") return inverterEntity(row.serial, suffix);
       if (row.kind === "panels") return portEntity(row.serial, row.port, suffix);
+      if (row.kind === "dtu" && suffix === "power_limit") return dtuNumber(row.serial, suffix);
       if (row.kind === "dtu") return dtuSensor(row.serial, suffix);
       return "";
     }

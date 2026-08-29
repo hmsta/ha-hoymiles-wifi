@@ -356,6 +356,8 @@ show_pagination: false
 
 The same `filters` object works on all table cards. Inverter cards accept `search`, `location`, `phase`, and `state`; DTU cards accept `search`, `location`, and `status`; panel cards accept `search`, `location`, `phase`, and `production`. Existing `production_status` is still accepted as a panel-card alias.
 
+For DTU tables, `power_limit` resolves to the Home Assistant number entity `number.dtu_<serial>_power_limit`; other common DTU columns such as `ip`, `rssi`, `ac_power`, and `daily_energy` resolve to their matching sensor or binary-sensor entities.
+
 ## Screenshots
 
 ![Hoymiles layout map](screenshots/layout-map.png)
