@@ -17,6 +17,7 @@
   const DEFAULT_COLUMNS = {
     inverter: [
       "inverter",
+      "dtu",
       "location",
       "phase",
       "state",
@@ -412,6 +413,37 @@
     return `number.dtu_${serial}_${suffix}`;
   }
 
+  function registryEntryForEntity(hass, entityId) {
+    return hass && hass.entities ? hass.entities[entityId] : null;
+  }
+
+  function deviceForId(hass, deviceId) {
+    return hass && hass.devices && deviceId ? hass.devices[deviceId] : null;
+  }
+
+  function deviceForEntity(hass, entityId) {
+    const registryEntry = registryEntryForEntity(hass, entityId);
+    return deviceForId(hass, registryEntry && registryEntry.device_id);
+  }
+
+  function hoymilesSerialFromDevice(device) {
+    const identifiers = device && Array.isArray(device.identifiers) ? device.identifiers : [];
+    for (const identifier of identifiers) {
+      if (Array.isArray(identifier) && identifier[0] === DOMAIN && identifier[1]) {
+        return normalizeSerial(identifier[1]);
+      }
+    }
+    return device && device.manufacturer === "Hoymiles" && device.serial_number
+      ? normalizeSerial(device.serial_number)
+      : "";
+  }
+
+  function connectedDtuSerial(hass, inverterEntityId) {
+    const inverterDevice = deviceForEntity(hass, inverterEntityId);
+    const dtuDevice = deviceForId(hass, inverterDevice && inverterDevice.via_device_id);
+    return hoymilesSerialFromDevice(dtuDevice);
+  }
+
   function stateBadge(value, label) {
     return `<span class="state ${value}"><span class="dot"></span>${label}</span>`;
   }
@@ -659,20 +691,32 @@
     _inverterRows() {
       return discoverInverterSerials(this._hass).map((serial) => {
         const state = inverterState(this._hass, serial);
+        const entityId = inverterEntity(serial, "ac_power");
         const deviceEntityId = this._firstKnownEntity([
-          inverterEntity(serial, "ac_power"),
+          entityId,
           inverterEntity(serial, "signal_strength"),
           inverterEntity(serial, "location"),
         ]);
+        const dtuSerial = connectedDtuSerial(this._hass, deviceEntityId);
+        const dtuDeviceEntityId = dtuSerial ? this._firstKnownEntity([
+          dtuBinary(dtuSerial),
+          dtuSensor(dtuSerial, "ac_power"),
+          dtuSensor(dtuSerial, "location"),
+        ]) : "";
         const row = {
           id: serial,
           kind: "inverter",
           serial,
-          entityId: inverterEntity(serial, "ac_power"),
+          entityId,
           deviceEntityId,
+          deviceEntityIds: {
+            inverter: deviceEntityId,
+            dtu: dtuDeviceEntityId,
+          },
           search: "",
           cells: {
             inverter: serial.toUpperCase(),
+            dtu: dtuSerial ? dtuSerial.toUpperCase() : "",
             location: stateValue(this._hass, inverterEntity(serial, "location")) || "",
             phase: stateValue(this._hass, inverterEntity(serial, "phase")) || "",
             state,
@@ -683,6 +727,7 @@
           },
           raw: {
             state,
+            dtu: dtuSerial,
             location: stateValue(this._hass, inverterEntity(serial, "location")) || "",
             phase: stateValue(this._hass, inverterEntity(serial, "phase")) || "",
             ac_power: numericState(this._hass, inverterEntity(serial, "ac_power")),
@@ -771,6 +816,9 @@
           serial,
           entityId: dtuBinary(serial),
           deviceEntityId,
+          deviceEntityIds: {
+            dtu: deviceEntityId,
+          },
           search: "",
           cells: {
             dtu: serial.toUpperCase(),
@@ -992,6 +1040,10 @@
     }
 
     _cellTargetAttrs(row, key) {
+      const deviceEntityId = row.deviceEntityIds && row.deviceEntityIds[key];
+      if (deviceEntityId) {
+        return ` data-device-entity-id="${this._escapeAttr(deviceEntityId)}"`;
+      }
       if ((key === "inverter" || key === "dtu") && row.deviceEntityId) {
         return ` data-device-entity-id="${this._escapeAttr(row.deviceEntityId)}"`;
       }
@@ -1096,7 +1148,7 @@
     }
 
     _openDeviceForEntity(entityId) {
-      const registryEntry = this._hass && this._hass.entities ? this._hass.entities[entityId] : null;
+      const registryEntry = registryEntryForEntity(this._hass, entityId);
       const deviceId = registryEntry && registryEntry.device_id;
       if (!deviceId) return false;
       window.history.pushState(null, "", `/config/devices/device/${encodeURIComponent(deviceId)}`);

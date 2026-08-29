@@ -326,7 +326,7 @@ Available table features:
 - click serial columns to open the Home Assistant device page
 - click metric/status columns to open the matching Home Assistant more-info dialog
 
-Default inverter columns are inverter, location, phase, state, AC power, AC current, temperature, and RSSI. Default panel columns are inverter, location, phase, port, DC power, DC voltage, DC current, and daily energy. Default DTU columns are DTU, location, status, IP, power, and daily energy.
+Default inverter columns are inverter, connected DTU, location, phase, state, AC power, AC current, temperature, and RSSI. The connected DTU column is derived from Home Assistant's device-registry `via_device` relationship. Default panel columns are inverter, location, phase, port, DC power, DC voltage, DC current, and daily energy. Default DTU columns are DTU, location, status, IP, power, and daily energy.
 
 Table cards render immediately when opened and then refresh at most every 300 seconds by default. Set `refresh_interval: 0` to disable passive refreshes; the card will still use the latest Home Assistant state when search, filters, sorting, page size, or pagination are changed. Set `show_filters: false` to hide the search/filter/page-size toolbar; this also hides the matched-row summary unless `show_summary: true` is set. Set `show_pagination: false` to hide the bottom pagination row. Default filters can be set with `filters`.
 
