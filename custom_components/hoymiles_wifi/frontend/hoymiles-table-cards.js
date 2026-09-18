@@ -451,7 +451,7 @@
   function discoverInverterSerials(hass) {
     const serials = new Set();
     for (const entityId of Object.keys(hass.states)) {
-      const match = entityId.match(/^sensor\.inverter_([a-z0-9]+)_/i);
+      const match = entityId.match(/^sensor\.inverter_([0-9a-f]{12})_/i);
       if (match) serials.add(normalizeSerial(match[1]));
     }
     return [...serials].sort(naturalCompare);
@@ -460,7 +460,7 @@
   function discoverPanelRefs(hass) {
     const refs = [];
     for (const entityId of Object.keys(hass.states)) {
-      const match = entityId.match(/^sensor\.inverter_([a-z0-9]+)_port_(\d+)_dc_power$/i);
+      const match = entityId.match(/^sensor\.inverter_([0-9a-f]{12})_port_(\d+)_dc_power$/i);
       if (!match) continue;
       refs.push({ serial: normalizeSerial(match[1]), port: Number(match[2]) });
     }
@@ -471,12 +471,12 @@
   function discoverDtuSerials(hass) {
     const serials = new Set();
     for (const entityId of Object.keys(hass.states)) {
-      let match = entityId.match(/^binary_sensor\.dtu_([a-z0-9]+)_connectivity$/i);
+      let match = entityId.match(/^binary_sensor\.dtu_([0-9a-f]{12})_connectivity$/i);
       if (match) {
         serials.add(normalizeSerial(match[1]));
         continue;
       }
-      match = entityId.match(/^sensor\.dtu_([a-z0-9]+)_/i);
+      match = entityId.match(/^sensor\.dtu_([0-9a-f]{12})_/i);
       if (match) serials.add(normalizeSerial(match[1]));
     }
     return [...serials].sort(naturalCompare);
