@@ -927,8 +927,32 @@
       return rows.slice(start, start + this._config.pageSize);
     }
 
+    _captureSearchFocus() {
+      const active = this.shadowRoot && this.shadowRoot.activeElement;
+      if (!active || !active.classList.contains("search")) return null;
+      return {
+        selectionStart: active.selectionStart,
+        selectionEnd: active.selectionEnd,
+        selectionDirection: active.selectionDirection,
+      };
+    }
+
+    _restoreSearchFocus(focusState) {
+      if (!focusState) return;
+      const search = this.shadowRoot.querySelector(".search");
+      if (!search) return;
+      search.focus({ preventScroll: true });
+      if (focusState.selectionStart == null || focusState.selectionEnd == null) return;
+      search.setSelectionRange(
+        focusState.selectionStart,
+        focusState.selectionEnd,
+        focusState.selectionDirection || "none",
+      );
+    }
+
     _render() {
       if (!this.shadowRoot) return;
+      const searchFocus = this._captureSearchFocus();
       const rows = this._rows();
       const filtered = this._sortedRows(this._filteredRows(rows));
       const pageCount = Math.max(1, Math.ceil(filtered.length / this._config.pageSize));
@@ -950,6 +974,7 @@
       this._hasRendered = true;
       this._lastPassiveRender = Date.now();
       this._bindEvents();
+      this._restoreSearchFocus(searchFocus);
     }
 
     _toolbar(rows) {
