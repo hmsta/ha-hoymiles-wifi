@@ -191,6 +191,11 @@
       cursor: pointer;
     }
 
+    tbody td {
+      -webkit-user-select: text;
+      user-select: text;
+    }
+
     .muted {
       color: var(--secondary-text-color);
     }
@@ -1130,12 +1135,21 @@
 
       for (const cell of root.querySelectorAll("tbody td[data-entity-id], tbody td[data-device-entity-id]")) {
         cell.addEventListener("click", (event) => {
+          if (this._hasTextSelection()) return;
           const target = event.currentTarget;
           const deviceEntityId = target.dataset.deviceEntityId;
           if (deviceEntityId && this._openDeviceForEntity(deviceEntityId)) return;
           this._openMoreInfo(target.dataset.entityId || deviceEntityId);
         });
       }
+    }
+
+    _hasTextSelection() {
+      const shadowSelection = typeof this.shadowRoot.getSelection === "function"
+        ? this.shadowRoot.getSelection()
+        : null;
+      const selection = shadowSelection || window.getSelection();
+      return Boolean(selection && !selection.isCollapsed && selection.toString());
     }
 
     _openMoreInfo(entityId) {
