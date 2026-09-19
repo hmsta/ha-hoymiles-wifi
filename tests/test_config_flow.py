@@ -45,7 +45,7 @@ from custom_components.hoymiles_wifi.error import CannotConnect
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -922,6 +922,15 @@ async def test_reconfigure_cross_swap_preserves_both_registry_entities(
             }
         ],
     )
+    device_registry = dr.async_get(hass)
+    device_a = device_registry.async_get_or_create(
+        config_entry_id=entry_x.entry_id,
+        identifiers={(DOMAIN, INVERTER_A_SERIAL_NUMBER)},
+    )
+    device_b = device_registry.async_get_or_create(
+        config_entry_id=entry_y.entry_id,
+        identifiers={(DOMAIN, INVERTER_B_SERIAL_NUMBER)},
+    )
     registry = er.async_get(hass)
     entity_a = registry.async_get_or_create(
         "sensor",
@@ -1051,6 +1060,8 @@ async def test_reconfigure_cross_swap_preserves_both_registry_entities(
     assert registry.async_get(entity_b.entity_id).unique_id == (
         f"hoymiles_{entry_x.entry_id}_{INVERTER_B_SERIAL_NUMBER}_ac_active_power"
     )
+    assert device_registry.async_get(device_a.id).config_entries == {entry_y.entry_id}
+    assert device_registry.async_get(device_b.id).config_entries == {entry_x.entry_id}
     for button_entity in button_entities:
         serial_number = (
             INVERTER_A_SERIAL_NUMBER

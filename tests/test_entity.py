@@ -14,6 +14,9 @@ from custom_components.hoymiles_wifi.entity import (
 from custom_components.hoymiles_wifi.entity_migration import (
     transfer_inverter_entity_registry_entries,
 )
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
 DTU_SERIAL_NUMBER = "4121a01953c8"
@@ -217,6 +220,43 @@ def test_transfer_inverter_registry_entry_before_new_owner_loads() -> None:
         config_entry_id="new-entry",
         new_unique_id=f"hoymiles_new-entry_{serial_number}_ac_active_power",
     )
+
+
+async def test_transfer_repairs_stale_inverter_device_config_entry(
+    hass: HomeAssistant,
+) -> None:
+    """Test an already moved inverter drops its previous DTU association."""
+    serial_number = "1421a01a4bb2"
+    old_entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="old-entry",
+        data={CONF_DTU_SERIAL_NUMBER: "4121a01953c8"},
+    )
+    target_entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="new-entry",
+        data={CONF_DTU_SERIAL_NUMBER: "4121a01953c9"},
+    )
+    old_entry.add_to_hass(hass)
+    target_entry.add_to_hass(hass)
+    device_registry = dr.async_get(hass)
+    device = device_registry.async_get_or_create(
+        config_entry_id=old_entry.entry_id,
+        identifiers={(DOMAIN, serial_number)},
+    )
+    device_registry.async_update_device(
+        device.id,
+        add_config_entry_id=target_entry.entry_id,
+    )
+
+    repaired = transfer_inverter_entity_registry_entries(
+        hass, target_entry.entry_id, {serial_number}
+    )
+
+    assert repaired is True
+    assert device_registry.async_get(device.id).config_entries == {
+        target_entry.entry_id
+    }
 
 
 @pytest.mark.parametrize(

@@ -81,6 +81,51 @@ def _entry_scoped_inverter_unique_id_tail(
     return None
 
 
+def _repair_inverter_device_registry_entries(
+    hass: HomeAssistant,
+    target_entry_id: str,
+    inverter_serials: set[str],
+) -> bool:
+    """Link inverter devices only to their current Hoymiles config entry."""
+    device_registry = dr.async_get(hass)
+    repaired = False
+    for serial_number in inverter_serials:
+        device_entry = device_registry.async_get_device(
+            identifiers={(DOMAIN, serial_number)}
+        )
+        if device_entry is None:
+            continue
+
+        stale_entry_ids = [
+            entry_id
+            for entry_id in device_entry.config_entries
+            if entry_id != target_entry_id
+            and (config_entry := hass.config_entries.async_get_entry(entry_id))
+            is not None
+            and config_entry.domain == DOMAIN
+        ]
+        if not stale_entry_ids and target_entry_id in device_entry.config_entries:
+            continue
+
+        if not stale_entry_ids:
+            device_registry.async_update_device(
+                device_entry.id,
+                add_config_entry_id=target_entry_id,
+            )
+            repaired = True
+            continue
+
+        for stale_entry_id in stale_entry_ids:
+            device_registry.async_update_device(
+                device_entry.id,
+                add_config_entry_id=target_entry_id,
+                remove_config_entry_id=stale_entry_id,
+            )
+            repaired = True
+
+    return repaired
+
+
 def transfer_inverter_entity_registry_entries(
     hass: HomeAssistant,
     target_entry_id: str,
@@ -165,7 +210,12 @@ def transfer_inverter_entity_registry_entries(
         entity_registry.async_update_entity(preserved.entity_id, **update_kwargs)
         repaired = True
 
-    return repaired
+    return (
+        _repair_inverter_device_registry_entries(
+            hass, target_entry_id, normalized_serials
+        )
+        or repaired
+    )
 
 
 def _known_serials(data: dict) -> set[str]:
