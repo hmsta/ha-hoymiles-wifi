@@ -14,6 +14,7 @@ from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.entity import entity_sources
 
 from .binary_sensor import BINARY_SENSORS
 from .button import BUTTONS
@@ -46,6 +47,99 @@ def _old_unique_id(entry_id: str, key: str) -> str:
 def _normalize_serial(serial_number: Any) -> str:
     """Normalize a serial number for comparisons."""
     return str(serial_number).lower()
+
+
+def _entry_scoped_inverter_unique_id_tail(
+    entity_entry: er.RegistryEntry, serial_number: str
+) -> str | None:
+    """Return the stable portion of an inverter entity unique ID."""
+    entry_id = entity_entry.config_entry_id
+    if not entry_id:
+        return None
+
+    prefix = f"hoymiles_{entry_id}_"
+    unique_id = entity_entry.unique_id
+    if not unique_id.startswith(prefix):
+        return None
+
+    tail = unique_id[len(prefix) :]
+    serial_prefix = f"{serial_number}_"
+    return tail if tail.startswith(serial_prefix) else None
+
+
+def transfer_inverter_entity_registry_entries(
+    hass: HomeAssistant,
+    target_entry_id: str,
+    inverter_serials: set[str],
+) -> bool:
+    """Move existing inverter registry entries to their newly owning DTU.
+
+    Entity unique IDs are scoped to a config entry, while entity IDs and recorder
+    history must remain stable when an inverter moves between DTUs.  Prefer the
+    pre-existing entry, remove any replacement created by the new owner, and
+    retarget the preserved entry to the new config entry and unique ID.
+
+    This also repairs moves completed by older integration versions: running
+    Reconfigure again discovers both the old unavailable entry and its newer
+    duplicate and collapses them back to the original entity ID.
+    """
+    normalized_serials = {
+        _normalize_serial(serial_number).strip()
+        for serial_number in inverter_serials
+        if serial_number
+    }
+    if not normalized_serials:
+        return False
+
+    entity_registry = er.async_get(hass)
+    loaded_entity_ids = entity_sources(hass)
+    groups: dict[tuple[str, str], list[er.RegistryEntry]] = {}
+    for entity_entry in list(entity_registry.entities.values()):
+        if entity_entry.platform != DOMAIN:
+            continue
+
+        for serial_number in normalized_serials:
+            tail = _entry_scoped_inverter_unique_id_tail(
+                entity_entry, serial_number
+            )
+            if tail is not None:
+                groups.setdefault((entity_entry.domain, tail), []).append(
+                    entity_entry
+                )
+                break
+
+    repaired = False
+    for (_entity_domain, tail), candidates in groups.items():
+        previous_entries = [
+            candidate
+            for candidate in candidates
+            if candidate.config_entry_id != target_entry_id
+        ]
+        if not previous_entries:
+            continue
+
+        # The unsuffixed/oldest entity ID normally sorts first.  Preserving it
+        # retains the entity ID, user customizations, recorder history, and
+        # long-term statistics identity.
+        preserved = min(previous_entries, key=lambda candidate: candidate.entity_id)
+        if preserved.entity_id in loaded_entity_ids:
+            _LOGGER.warning(
+                "Deferring registry transfer for loaded Hoymiles entity %s",
+                preserved.entity_id,
+            )
+            continue
+        for duplicate in candidates:
+            if duplicate.entity_id != preserved.entity_id:
+                entity_registry.async_remove(duplicate.entity_id)
+
+        target_unique_id = f"hoymiles_{target_entry_id}_{tail}"
+        update_kwargs: dict[str, Any] = {"config_entry_id": target_entry_id}
+        if preserved.unique_id != target_unique_id:
+            update_kwargs["new_unique_id"] = target_unique_id
+        entity_registry.async_update_entity(preserved.entity_id, **update_kwargs)
+        repaired = True
+
+    return repaired
 
 
 def _known_serials(data: dict) -> set[str]:

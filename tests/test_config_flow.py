@@ -1,6 +1,7 @@
 """Unit tests for the Hoymiles config flow."""
 
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, call, patch
 
 import pytest
 
@@ -33,6 +34,7 @@ from custom_components.hoymiles_wifi.const import (
     METER_TYPE_THREE_PHASE,
 )
 from custom_components.hoymiles_wifi.config_flow import (
+    _claimed_inverter_metadata,
     _detected_inverter_serials,
     _metadata_entity_unique_ids,
     _metadata_map_to_text,
@@ -43,6 +45,7 @@ from custom_components.hoymiles_wifi.error import CannotConnect
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import entity_registry as er
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -143,6 +146,8 @@ def _add_config_entry(
     ports: list[dict] | None = None,
     meters: list[dict] | None = None,
     hybrid_inverters: list[dict] | None = None,
+    inverter_locations: dict[str, str] | None = None,
+    inverter_phases: dict[str, str] | None = None,
 ) -> MockConfigEntry:
     """Add a Hoymiles config entry with custom device lists."""
     entry = MockConfigEntry(
@@ -157,6 +162,8 @@ def _add_config_entry(
             CONF_PORTS: ports or [],
             CONF_METERS: meters or [],
             CONF_HYBRID_INVERTERS: hybrid_inverters or [],
+            CONF_INVERTER_LOCATIONS: inverter_locations or {},
+            CONF_INVERTER_PHASES: inverter_phases or {},
         },
     )
     entry.add_to_hass(hass)
@@ -305,6 +312,14 @@ def test_remove_claimed_inverters_from_data_preserves_meters() -> None:
                 "model_name": "HYS",
             }
         ],
+        CONF_INVERTER_LOCATIONS: {
+            INVERTER_A_SERIAL_NUMBER: "Moved roof",
+            INVERTER_KEEP_SERIAL_NUMBER: "Kept roof",
+        },
+        CONF_INVERTER_PHASES: {
+            INVERTER_A_SERIAL_NUMBER: "L1",
+            INVERTER_KEEP_SERIAL_NUMBER: "L2",
+        },
     }
 
     updated_data, changed = _remove_claimed_inverters_from_data(
@@ -324,6 +339,35 @@ def test_remove_claimed_inverters_from_data_preserves_meters() -> None:
     ]
     assert updated_data[CONF_HYBRID_INVERTERS] == []
     assert updated_data[CONF_METERS] == [meter]
+    assert updated_data[CONF_INVERTER_LOCATIONS] == {
+        INVERTER_KEEP_SERIAL_NUMBER: "Kept roof"
+    }
+    assert updated_data[CONF_INVERTER_PHASES] == {
+        INVERTER_KEEP_SERIAL_NUMBER: "L2"
+    }
+
+
+def test_claimed_inverter_metadata_moves_to_new_owner() -> None:
+    """Test location and phase metadata follow a claimed inverter."""
+    source_entry = SimpleNamespace(
+        data={
+            CONF_INVERTER_LOCATIONS: {
+                INVERTER_A_SERIAL_NUMBER.upper(): "Moved roof",
+                INVERTER_KEEP_SERIAL_NUMBER: "Kept roof",
+            },
+            CONF_INVERTER_PHASES: {
+                INVERTER_A_SERIAL_NUMBER: "L1",
+                INVERTER_KEEP_SERIAL_NUMBER: "L2",
+            },
+        }
+    )
+
+    locations, phases = _claimed_inverter_metadata(
+        [(source_entry, {})], {INVERTER_A_SERIAL_NUMBER}
+    )
+
+    assert locations == {INVERTER_A_SERIAL_NUMBER: "Moved roof"}
+    assert phases == {INVERTER_A_SERIAL_NUMBER: "L1"}
 
 
 async def test_form_valid_input(hass: HomeAssistant) -> None:
@@ -651,6 +695,14 @@ async def test_form_claims_detected_inverters_from_other_dtu(
                 "model_name": "HYS",
             }
         ],
+        inverter_locations={
+            INVERTER_A_SERIAL_NUMBER: "Moved roof",
+            INVERTER_KEEP_SERIAL_NUMBER: "Kept roof",
+        },
+        inverter_phases={
+            INVERTER_A_SERIAL_NUMBER: "L1",
+            INVERTER_KEEP_SERIAL_NUMBER: "L2",
+        },
     )
 
     result = await hass.config_entries.flow.async_init(
@@ -706,6 +758,12 @@ async def test_form_claims_detected_inverters_from_other_dtu(
     ]
     assert result2["data"][CONF_PORTS] == discovered_ports
     assert result2["data"][CONF_HYBRID_INVERTERS] == discovered_hybrid_inverters
+    assert result2["data"][CONF_INVERTER_LOCATIONS] == {
+        INVERTER_A_SERIAL_NUMBER: "Moved roof"
+    }
+    assert result2["data"][CONF_INVERTER_PHASES] == {
+        INVERTER_A_SERIAL_NUMBER: "L1"
+    }
 
     assert existing_entry.data[CONF_INVERTERS] == [INVERTER_KEEP_SERIAL_NUMBER]
     assert existing_entry.data[CONF_THREE_PHASE_INVERTERS] == []
@@ -717,6 +775,12 @@ async def test_form_claims_detected_inverters_from_other_dtu(
     ]
     assert existing_entry.data[CONF_HYBRID_INVERTERS] == []
     assert existing_entry.data[CONF_METERS] == [existing_meter]
+    assert existing_entry.data[CONF_INVERTER_LOCATIONS] == {
+        INVERTER_KEEP_SERIAL_NUMBER: "Kept roof"
+    }
+    assert existing_entry.data[CONF_INVERTER_PHASES] == {
+        INVERTER_KEEP_SERIAL_NUMBER: "L2"
+    }
     mock_reload.assert_awaited_once_with(existing_entry.entry_id)
 
 
@@ -785,7 +849,10 @@ async def test_reconfigure_moves_swapped_inverters_between_dtus(
         assert result2["reason"] == "reconfigure_successful"
         assert entry_a.data[CONF_INVERTERS] == []
         assert entry_a.data[CONF_PORTS] == []
-        assert entry_b.data[CONF_INVERTERS] == [INVERTER_A_SERIAL_NUMBER]
+        assert entry_b.data[CONF_INVERTERS] == [
+            INVERTER_B_SERIAL_NUMBER,
+            INVERTER_A_SERIAL_NUMBER,
+        ]
 
         result3 = await hass.config_entries.flow.async_init(
             DOMAIN,
@@ -817,15 +884,154 @@ async def test_reconfigure_moves_swapped_inverters_between_dtus(
     assert result4["type"] == FlowResultType.ABORT
     assert result4["reason"] == "reconfigure_successful"
     assert entry_a.data[CONF_INVERTERS] == [INVERTER_B_SERIAL_NUMBER.upper()]
-    assert entry_b.data[CONF_INVERTERS] == []
-    assert entry_b.data[CONF_PORTS] == []
+    assert entry_b.data[CONF_INVERTERS] == [INVERTER_A_SERIAL_NUMBER]
+    assert entry_b.data[CONF_PORTS] == [
+        {
+            "inverter_serial_number": INVERTER_A_SERIAL_NUMBER,
+            "port_number": 1,
+        }
+    ]
     assert mock_reload.await_count == 4
 
 
-async def test_reconfigure_does_not_remove_old_owner_when_current_reload_fails(
+async def test_reconfigure_cross_swap_preserves_both_registry_entities(
     hass: HomeAssistant,
 ) -> None:
-    """Test old DTU keeps claimed inverter if the current DTU reload fails."""
+    """Test sequential reconfigure swaps two inverters without duplicate entities."""
+    entry_x = _add_config_entry(
+        hass,
+        entry_id="dtu-x",
+        dtu_serial_number=DTU_TEST_SERIAL_NUMBER,
+        single_phase_inverters=[INVERTER_A_SERIAL_NUMBER],
+        ports=[
+            {
+                "inverter_serial_number": INVERTER_A_SERIAL_NUMBER,
+                "port_number": 1,
+            }
+        ],
+    )
+    entry_y = _add_config_entry(
+        hass,
+        entry_id="dtu-y",
+        dtu_serial_number=DTU_SECOND_TEST_SERIAL_NUMBER,
+        single_phase_inverters=[INVERTER_B_SERIAL_NUMBER],
+        ports=[
+            {
+                "inverter_serial_number": INVERTER_B_SERIAL_NUMBER,
+                "port_number": 1,
+            }
+        ],
+    )
+    registry = er.async_get(hass)
+    entity_a = registry.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        f"hoymiles_{entry_x.entry_id}_{INVERTER_A_SERIAL_NUMBER}_ac_active_power",
+        suggested_object_id=f"inverter_{INVERTER_A_SERIAL_NUMBER}_ac_power",
+        config_entry=entry_x,
+    )
+    entity_b = registry.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        f"hoymiles_{entry_y.entry_id}_{INVERTER_B_SERIAL_NUMBER}_ac_active_power",
+        suggested_object_id=f"inverter_{INVERTER_B_SERIAL_NUMBER}_ac_power",
+        config_entry=entry_y,
+    )
+    original_entity_ids = {entity_a.entity_id, entity_b.entity_id}
+
+    with patch.object(
+        hass.config_entries,
+        "async_reload",
+        new=AsyncMock(return_value=True),
+    ) as mock_reload:
+        flow_y = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_RECONFIGURE,
+                "entry_id": entry_y.entry_id,
+            },
+        )
+        with patch(
+            "custom_components.hoymiles_wifi.config_flow.async_get_config_entry_data_for_host",
+            new=AsyncMock(
+                return_value=_discovered_config_data(
+                    dtu_serial_number=DTU_SECOND_TEST_SERIAL_NUMBER,
+                    single_phase_inverters=[INVERTER_A_SERIAL_NUMBER],
+                    ports=[
+                        {
+                            "inverter_serial_number": INVERTER_A_SERIAL_NUMBER,
+                            "port_number": 1,
+                        }
+                    ],
+                )
+            ),
+        ):
+            result_y = await hass.config_entries.flow.async_configure(
+                flow_y["flow_id"], MOCK_DATA_STEP
+            )
+
+        flow_x = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_RECONFIGURE,
+                "entry_id": entry_x.entry_id,
+            },
+        )
+        with patch(
+            "custom_components.hoymiles_wifi.config_flow.async_get_config_entry_data_for_host",
+            new=AsyncMock(
+                return_value=_discovered_config_data(
+                    dtu_serial_number=DTU_TEST_SERIAL_NUMBER,
+                    single_phase_inverters=[INVERTER_B_SERIAL_NUMBER],
+                    ports=[
+                        {
+                            "inverter_serial_number": INVERTER_B_SERIAL_NUMBER,
+                            "port_number": 1,
+                        }
+                    ],
+                )
+            ),
+        ):
+            result_x = await hass.config_entries.flow.async_configure(
+                flow_x["flow_id"], MOCK_DATA_STEP
+            )
+
+    assert result_y["reason"] == "reconfigure_successful"
+    assert result_x["reason"] == "reconfigure_successful"
+    assert entry_x.data[CONF_INVERTERS] == [INVERTER_B_SERIAL_NUMBER]
+    assert entry_y.data[CONF_INVERTERS] == [INVERTER_A_SERIAL_NUMBER]
+    assert mock_reload.await_args_list == [
+        call(entry_x.entry_id),
+        call(entry_y.entry_id),
+        call(entry_y.entry_id),
+        call(entry_x.entry_id),
+    ]
+
+    inverter_entities = {
+        entity_entry.entity_id: entity_entry
+        for entity_entry in registry.entities.values()
+        if entity_entry.platform == DOMAIN
+        and (
+            INVERTER_A_SERIAL_NUMBER in entity_entry.unique_id
+            or INVERTER_B_SERIAL_NUMBER in entity_entry.unique_id
+        )
+    }
+    assert set(inverter_entities) == original_entity_ids
+    assert registry.async_get(entity_a.entity_id).config_entry_id == entry_y.entry_id
+    assert registry.async_get(entity_b.entity_id).config_entry_id == entry_x.entry_id
+    assert registry.async_get(entity_a.entity_id).unique_id == (
+        f"hoymiles_{entry_y.entry_id}_{INVERTER_A_SERIAL_NUMBER}_ac_active_power"
+    )
+    assert registry.async_get(entity_b.entity_id).unique_id == (
+        f"hoymiles_{entry_x.entry_id}_{INVERTER_B_SERIAL_NUMBER}_ac_active_power"
+    )
+    assert not any(entity_id.endswith("_2") for entity_id in inverter_entities)
+
+
+async def test_reconfigure_does_not_move_when_previous_owner_reload_fails(
+    hass: HomeAssistant,
+) -> None:
+    """Test old DTU keeps its inverter if removing its entities fails."""
     entry_a = _add_config_entry(
         hass,
         entry_id="dtu-a",
@@ -889,7 +1095,7 @@ async def test_reconfigure_does_not_remove_old_owner_when_current_reload_fails(
         }
     ]
     assert mock_reload.await_count == 1
-    mock_reload.assert_awaited_once_with(entry_b.entry_id)
+    mock_reload.assert_awaited_once_with(entry_a.entry_id)
 
 
 @pytest.mark.parametrize(

@@ -48,7 +48,10 @@ from .const import (
     MIN_METER_ENERGY_CONSISTENCY_TOLERANCE,
     MIN_TIMEOUT_SECONDS,
 )
-from .entity_migration import async_migrate_entity_unique_ids
+from .entity_migration import (
+    async_migrate_entity_unique_ids,
+    transfer_inverter_entity_registry_entries,
+)
 from .error import CannotConnect
 from .layout_metadata import (
     MetadataMapError,
@@ -421,12 +424,30 @@ def _remove_claimed_inverters_from_data(
         if _normalize_serial(port.get("inverter_serial_number"))
         not in claimed_inverter_serials
     ]
+    inverter_locations = data.get(CONF_INVERTER_LOCATIONS, {})
+    if not isinstance(inverter_locations, dict):
+        inverter_locations = {}
+    inverter_phases = data.get(CONF_INVERTER_PHASES, {})
+    if not isinstance(inverter_phases, dict):
+        inverter_phases = {}
+    updated_inverter_locations = {
+        serial_number: value
+        for serial_number, value in inverter_locations.items()
+        if _normalize_serial(serial_number) not in claimed_inverter_serials
+    }
+    updated_inverter_phases = {
+        serial_number: value
+        for serial_number, value in inverter_phases.items()
+        if _normalize_serial(serial_number) not in claimed_inverter_serials
+    }
 
     changed = (
         updated_inverters != data.get(CONF_INVERTERS, [])
         or updated_three_phase_inverters != data.get(CONF_THREE_PHASE_INVERTERS, [])
         or updated_hybrid_inverters != data.get(CONF_HYBRID_INVERTERS, [])
         or updated_ports != data.get(CONF_PORTS, [])
+        or updated_inverter_locations != data.get(CONF_INVERTER_LOCATIONS, {})
+        or updated_inverter_phases != data.get(CONF_INVERTER_PHASES, {})
     )
 
     if changed:
@@ -434,8 +455,37 @@ def _remove_claimed_inverters_from_data(
         updated_data[CONF_THREE_PHASE_INVERTERS] = updated_three_phase_inverters
         updated_data[CONF_HYBRID_INVERTERS] = updated_hybrid_inverters
         updated_data[CONF_PORTS] = updated_ports
+        updated_data[CONF_INVERTER_LOCATIONS] = updated_inverter_locations
+        updated_data[CONF_INVERTER_PHASES] = updated_inverter_phases
 
     return updated_data, changed
+
+
+def _claimed_inverter_metadata(
+    entry_updates: list[tuple[ConfigEntry, dict]],
+    claimed_inverter_serials: set[str],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Collect metadata belonging to inverters moving from another DTU."""
+    locations: dict[str, str] = {}
+    phases: dict[str, str] = {}
+    for entry, _updated_data in entry_updates:
+        for key, target in (
+            (CONF_INVERTER_LOCATIONS, locations),
+            (CONF_INVERTER_PHASES, phases),
+        ):
+            metadata = entry.data.get(key, {})
+            if not isinstance(metadata, dict):
+                continue
+            for serial_number, value in metadata.items():
+                serial_number = _normalize_serial(serial_number)
+                value = normalize_metadata_value(value)
+                if (
+                    serial_number in claimed_inverter_serials
+                    and value
+                    and serial_number not in target
+                ):
+                    target[serial_number] = value
+    return locations, phases
 
 
 def _claimed_inverter_entry_updates(
@@ -475,17 +525,21 @@ def _claimed_inverter_entry_updates(
 
 async def _apply_claimed_inverter_entry_updates(
     hass: HomeAssistant, entry_updates: list[tuple[ConfigEntry, dict]]
-) -> None:
+) -> set[str]:
     """Apply planned config entry updates for moved inverter ownership."""
+    reloaded_entry_ids: set[str] = set()
     for entry, updated_data in entry_updates:
         hass.config_entries.async_update_entry(
             entry, data=updated_data, version=CONFIG_VERSION
         )
-        if not await hass.config_entries.async_reload(entry.entry_id):
+        if await hass.config_entries.async_reload(entry.entry_id):
+            reloaded_entry_ids.add(entry.entry_id)
+        else:
             _LOGGER.warning(
                 "Failed to reload Hoymiles entry %s after moving inverter ownership",
                 entry.entry_id,
             )
+    return reloaded_entry_ids
 
 
 async def _claim_detected_inverters(
@@ -495,19 +549,27 @@ async def _claim_detected_inverters(
     ports: list[dict],
     hybrid_inverters: list[dict],
     current_entry_id: str | None = None,
-) -> None:
+) -> tuple[dict[str, str], dict[str, str]]:
     """Move detected inverters from other Hoymiles entries to this DTU."""
+    claimed_inverter_serials = _detected_inverter_serials(
+        single_phase_inverters, three_phase_inverters, ports, hybrid_inverters
+    )
+    entry_updates = _claimed_inverter_entry_updates(
+        hass,
+        single_phase_inverters,
+        three_phase_inverters,
+        ports,
+        hybrid_inverters,
+        current_entry_id,
+    )
+    claimed_metadata = _claimed_inverter_metadata(
+        entry_updates, claimed_inverter_serials
+    )
     await _apply_claimed_inverter_entry_updates(
         hass,
-        _claimed_inverter_entry_updates(
-            hass,
-            single_phase_inverters,
-            three_phase_inverters,
-            ports,
-            hybrid_inverters,
-            current_entry_id,
-        ),
+        entry_updates,
     )
+    return claimed_metadata
 
 
 class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
@@ -554,7 +616,7 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 meters = _filter_duplicate_meters(self.hass, meters)
                 await self.async_set_unique_id(dtu_sn)
                 self._abort_if_unique_id_configured()
-                await _claim_detected_inverters(
+                claimed_locations, claimed_phases = await _claim_detected_inverters(
                     self.hass,
                     single_phase_inverters,
                     three_phase_inverters,
@@ -582,8 +644,8 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                         CONF_TIMEOUT: timeout,
                         CONF_STARTUP_COOLDOWN: startup_cooldown,
                         CONF_DTU_LOCATION: "",
-                        CONF_INVERTER_LOCATIONS: {},
-                        CONF_INVERTER_PHASES: {},
+                        CONF_INVERTER_LOCATIONS: claimed_locations,
+                        CONF_INVERTER_PHASES: claimed_phases,
                     },
                 )
 
@@ -656,6 +718,12 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 if dtu_sn != entry.unique_id:
                     return self.async_abort(reason="another_device")
                 meters = _filter_duplicate_meters(self.hass, meters, entry.entry_id)
+                detected_inverter_serials = _detected_inverter_serials(
+                    single_phase_inverters,
+                    three_phase_inverters,
+                    ports,
+                    hybrid_inverters,
+                )
                 claimed_inverter_entry_updates = _claimed_inverter_entry_updates(
                     self.hass,
                     single_phase_inverters,
@@ -664,6 +732,11 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                     hybrid_inverters,
                     entry.entry_id,
                 )
+                claimed_locations, claimed_phases = _claimed_inverter_metadata(
+                    claimed_inverter_entry_updates, detected_inverter_serials
+                )
+                inverter_locations = {**claimed_locations, **inverter_locations}
+                inverter_phases = {**claimed_phases, **inverter_phases}
                 (
                     single_phase_inverters,
                     three_phase_inverters,
@@ -711,6 +784,11 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 }
 
                 old_data = dict(entry.data)
+                old_version = entry.version
+                claimed_entry_snapshots = [
+                    (claimed_entry, dict(claimed_entry.data), claimed_entry.version)
+                    for claimed_entry, _updated_data in claimed_inverter_entry_updates
+                ]
                 self.hass.config_entries.async_update_entry(
                     entry, data=data, version=CONFIG_VERSION
                 )
@@ -718,14 +796,73 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 _remove_stale_metadata_entities(
                     self.hass, entry.entry_id, old_data, data
                 )
-                result = await self.hass.config_entries.async_reload(entry.entry_id)
-                if not result:
-                    errors["base"] = "unknown"
-                else:
+
+                # Reload previous owners without the moved inverter before loading
+                # it here. The original registry row can then be retargeted before
+                # Home Assistant has any reason to create an `_2` replacement.
+                reloaded_claimed_entry_ids = (
                     await _apply_claimed_inverter_entry_updates(
                         self.hass, claimed_inverter_entry_updates
                     )
-                    return self.async_abort(reason="reconfigure_successful")
+                )
+                if len(reloaded_claimed_entry_ids) != len(
+                    claimed_inverter_entry_updates
+                ):
+                    self.hass.config_entries.async_update_entry(
+                        entry, data=old_data, version=old_version
+                    )
+                    for claimed_entry, snapshot_data, snapshot_version in (
+                        claimed_entry_snapshots
+                    ):
+                        self.hass.config_entries.async_update_entry(
+                            claimed_entry,
+                            data=snapshot_data,
+                            version=snapshot_version,
+                        )
+                        if claimed_entry.entry_id in reloaded_claimed_entry_ids:
+                            await self.hass.config_entries.async_reload(
+                                claimed_entry.entry_id
+                            )
+                    errors["base"] = "unknown"
+                else:
+                    transfer_inverter_entity_registry_entries(
+                        self.hass,
+                        entry.entry_id,
+                        detected_inverter_serials,
+                    )
+                    if not await self.hass.config_entries.async_reload(entry.entry_id):
+                        self.hass.config_entries.async_update_entry(
+                            entry, data=old_data, version=old_version
+                        )
+                        for claimed_entry, snapshot_data, snapshot_version in (
+                            claimed_entry_snapshots
+                        ):
+                            self.hass.config_entries.async_update_entry(
+                                claimed_entry,
+                                data=snapshot_data,
+                                version=snapshot_version,
+                            )
+                            claimed_serials = detected_inverter_serials & (
+                                _detected_inverter_serials(
+                                    snapshot_data.get(CONF_INVERTERS, []),
+                                    snapshot_data.get(
+                                        CONF_THREE_PHASE_INVERTERS, []
+                                    ),
+                                    snapshot_data.get(CONF_PORTS, []),
+                                    snapshot_data.get(CONF_HYBRID_INVERTERS, []),
+                                )
+                            )
+                            transfer_inverter_entity_registry_entries(
+                                self.hass,
+                                claimed_entry.entry_id,
+                                claimed_serials,
+                            )
+                            await self.hass.config_entries.async_reload(
+                                claimed_entry.entry_id
+                            )
+                        errors["base"] = "unknown"
+                    else:
+                        return self.async_abort(reason="reconfigure_successful")
 
         return self.async_show_form(
             step_id="reconfigure",

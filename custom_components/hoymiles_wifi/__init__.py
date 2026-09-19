@@ -56,7 +56,10 @@ from .coordinator import (
     HoymilesRealDataUpdateCoordinator,
     HoymilesEnergyStorageUpdateCoordinator,
 )
-from .entity_migration import async_migrate_entity_unique_ids
+from .entity_migration import (
+    async_migrate_entity_unique_ids,
+    transfer_inverter_entity_registry_entries,
+)
 from .layout_metadata import (
     LayoutMetadataError,
     PhaseMapError,
@@ -311,6 +314,17 @@ def _configured_inverter_serials(data: dict[str, Any]) -> set[str]:
     return {serial for serial in serials if serial}
 
 
+def _exclusively_owned_inverter_serials(
+    hass: HomeAssistant, config_entry: ConfigEntry
+) -> set[str]:
+    """Return inverter serials not still claimed by another config entry."""
+    serials = _configured_inverter_serials(config_entry.data)
+    for other_entry in hass.config_entries.async_entries(DOMAIN):
+        if other_entry.entry_id != config_entry.entry_id:
+            serials.difference_update(_configured_inverter_serials(other_entry.data))
+    return serials
+
+
 def _stored_metadata_unique_ids(entry_id: str, data: dict[str, Any]) -> set[str]:
     """Return metadata entity unique IDs backed by structured metadata storage."""
     return set(_stored_metadata_entity_ids(entry_id, data))
@@ -437,6 +451,11 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     """Set up this integration using UI."""
 
     await _async_register_frontend(hass)
+    transfer_inverter_entity_registry_entries(
+        hass,
+        config_entry.entry_id,
+        _exclusively_owned_inverter_serials(hass, config_entry),
+    )
     _repair_metadata_entity_ids(hass, config_entry.entry_id, config_entry.data)
 
     hass.data.setdefault(DOMAIN, {})

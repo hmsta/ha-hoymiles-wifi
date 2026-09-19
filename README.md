@@ -51,6 +51,8 @@ This reduces startup bursts and gives shared meter data more frequent combined u
 
 When adding or reconfiguring a DTU, detected inverters are automatically claimed by that DTU. If another Hoymiles config entry still has the same inverter serial number stored, the inverter and its port data are removed from the old entry and that entry is reloaded.
 
+The inverter's existing entity IDs, customizations, recorder history, long-term statistics identity, location, and phase metadata follow it to the new DTU. Replacement entities created by older integration versions (often with an `_2` suffix) are collapsed back into the original registry entities during setup or the next destination-DTU reconfigure.
+
 This handles physical inverter moves between DTUs without requiring a precise reconfigure order. Reconfigure whichever DTU currently detects the moved inverter; that DTU becomes the owner in Home Assistant. Shared meters are not affected by this behavior.
 
 ### Serial-Based Device Names
