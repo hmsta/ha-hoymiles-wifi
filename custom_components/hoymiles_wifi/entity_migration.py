@@ -38,6 +38,12 @@ from .sensor import (
 
 _LOGGER = logging.getLogger(__name__)
 
+_INVERTER_BUTTON_UNIQUE_ID_PREFIXES = (
+    "turn_off_inverter_",
+    "turn_on_inverter_",
+    "reboot_inverter_",
+)
+
 
 def _old_unique_id(entry_id: str, key: str) -> str:
     """Return the legacy index-based unique ID."""
@@ -63,8 +69,16 @@ def _entry_scoped_inverter_unique_id_tail(
         return None
 
     tail = unique_id[len(prefix) :]
+    normalized_tail = tail.lower()
     serial_prefix = f"{serial_number}_"
-    return tail if tail.startswith(serial_prefix) else None
+    if normalized_tail.startswith(serial_prefix):
+        return tail
+    if any(
+        normalized_tail == f"{button_prefix}{serial_number}"
+        for button_prefix in _INVERTER_BUTTON_UNIQUE_ID_PREFIXES
+    ):
+        return tail
+    return None
 
 
 def transfer_inverter_entity_registry_entries(
@@ -103,13 +117,13 @@ def transfer_inverter_entity_registry_entries(
                 entity_entry, serial_number
             )
             if tail is not None:
-                groups.setdefault((entity_entry.domain, tail), []).append(
+                groups.setdefault((entity_entry.domain, tail.lower()), []).append(
                     entity_entry
                 )
                 break
 
     repaired = False
-    for (_entity_domain, tail), candidates in groups.items():
+    for (_entity_domain, _normalized_tail), candidates in groups.items():
         previous_entries = [
             candidate
             for candidate in candidates
@@ -132,7 +146,19 @@ def transfer_inverter_entity_registry_entries(
             if duplicate.entity_id != preserved.entity_id:
                 entity_registry.async_remove(duplicate.entity_id)
 
-        target_unique_id = f"hoymiles_{target_entry_id}_{tail}"
+        target_entries = [
+            candidate
+            for candidate in candidates
+            if candidate.config_entry_id == target_entry_id
+        ]
+        if target_entries:
+            target_unique_id = min(
+                target_entries, key=lambda candidate: candidate.entity_id
+            ).unique_id
+        else:
+            preserved_prefix = f"hoymiles_{preserved.config_entry_id}_"
+            preserved_tail = preserved.unique_id[len(preserved_prefix) :]
+            target_unique_id = f"hoymiles_{target_entry_id}_{preserved_tail}"
         update_kwargs: dict[str, Any] = {"config_entry_id": target_entry_id}
         if preserved.unique_id != target_unique_id:
             update_kwargs["new_unique_id"] = target_unique_id

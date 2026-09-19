@@ -937,7 +937,33 @@ async def test_reconfigure_cross_swap_preserves_both_registry_entities(
         suggested_object_id=f"inverter_{INVERTER_B_SERIAL_NUMBER}_ac_power",
         config_entry=entry_y,
     )
-    original_entity_ids = {entity_a.entity_id, entity_b.entity_id}
+    button_specs = (
+        ("turn_off_inverter", "turn_off"),
+        ("turn_on_inverter", "turn_on"),
+        ("reboot_inverter", "restart"),
+    )
+    button_entities = []
+    for serial_number, config_entry in (
+        (INVERTER_A_SERIAL_NUMBER, entry_x),
+        (INVERTER_B_SERIAL_NUMBER, entry_y),
+    ):
+        for button_key, entity_suffix in button_specs:
+            button_entities.append(
+                registry.async_get_or_create(
+                    "button",
+                    DOMAIN,
+                    f"hoymiles_{config_entry.entry_id}_{button_key}_{serial_number}",
+                    suggested_object_id=(
+                        f"inverter_{serial_number}_{entity_suffix}"
+                    ),
+                    config_entry=config_entry,
+                )
+            )
+    original_entity_ids = {
+        entity_a.entity_id,
+        entity_b.entity_id,
+        *(entity.entity_id for entity in button_entities),
+    }
 
     with patch.object(
         hass.config_entries,
@@ -1025,6 +1051,17 @@ async def test_reconfigure_cross_swap_preserves_both_registry_entities(
     assert registry.async_get(entity_b.entity_id).unique_id == (
         f"hoymiles_{entry_x.entry_id}_{INVERTER_B_SERIAL_NUMBER}_ac_active_power"
     )
+    for button_entity in button_entities:
+        serial_number = (
+            INVERTER_A_SERIAL_NUMBER
+            if INVERTER_A_SERIAL_NUMBER in button_entity.entity_id
+            else INVERTER_B_SERIAL_NUMBER
+        )
+        target_entry = entry_y if serial_number == INVERTER_A_SERIAL_NUMBER else entry_x
+        current_entry = registry.async_get(button_entity.entity_id)
+        assert current_entry.config_entry_id == target_entry.entry_id
+        assert current_entry.unique_id.startswith(f"hoymiles_{target_entry.entry_id}_")
+        assert current_entry.unique_id.endswith(serial_number)
     assert not any(entity_id.endswith("_2") for entity_id in inverter_entities)
 
 

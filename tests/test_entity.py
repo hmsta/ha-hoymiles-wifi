@@ -3,6 +3,8 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from custom_components.hoymiles_wifi.const import CONF_DTU_SERIAL_NUMBER, DOMAIN
 from custom_components.hoymiles_wifi.entity import (
     HoymilesEntity,
@@ -214,6 +216,61 @@ def test_transfer_inverter_registry_entry_before_new_owner_loads() -> None:
         original.entity_id,
         config_entry_id="new-entry",
         new_unique_id=f"hoymiles_new-entry_{serial_number}_ac_active_power",
+    )
+
+
+@pytest.mark.parametrize(
+    ("button_key", "entity_suffix"),
+    [
+        ("turn_off_inverter", "turn_off"),
+        ("turn_on_inverter", "turn_on"),
+        ("reboot_inverter", "restart"),
+    ],
+)
+def test_transfer_inverter_button_preserves_original_entity(
+    button_key: str, entity_suffix: str
+) -> None:
+    """Test moved inverter controls retain their old registry rows and IDs."""
+    serial_number = "1421a01a4bb2"
+    original = SimpleNamespace(
+        config_entry_id="old-entry",
+        domain="button",
+        entity_id=f"button.inverter_{serial_number}_{entity_suffix}",
+        platform=DOMAIN,
+        unique_id=f"hoymiles_old-entry_{button_key}_{serial_number}",
+    )
+    replacement = SimpleNamespace(
+        config_entry_id="new-entry",
+        domain="button",
+        entity_id=f"button.solar_inverter_inverter_{serial_number}_{entity_suffix}",
+        platform=DOMAIN,
+        unique_id=f"hoymiles_new-entry_{button_key}_{serial_number}",
+    )
+    registry = MagicMock()
+    registry.entities = {
+        entity.entity_id: entity for entity in (original, replacement)
+    }
+
+    with (
+        patch(
+            "custom_components.hoymiles_wifi.entity_migration.er.async_get",
+            return_value=registry,
+        ),
+        patch(
+            "custom_components.hoymiles_wifi.entity_migration.entity_sources",
+            return_value={},
+        ),
+    ):
+        repaired = transfer_inverter_entity_registry_entries(
+            MagicMock(), "new-entry", {serial_number}
+        )
+
+    assert repaired is True
+    registry.async_remove.assert_called_once_with(replacement.entity_id)
+    registry.async_update_entity.assert_called_once_with(
+        original.entity_id,
+        config_entry_id="new-entry",
+        new_unique_id=f"hoymiles_new-entry_{button_key}_{serial_number}",
     )
 
 
