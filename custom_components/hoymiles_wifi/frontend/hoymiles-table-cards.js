@@ -657,7 +657,7 @@
 
       const now = Date.now();
       if (now - this._lastPassiveRender >= this._config.refreshIntervalMs) {
-        this._render();
+        if (!this._renderResults()) this._render();
       }
     }
 
@@ -927,6 +927,19 @@
       return rows.slice(start, start + this._config.pageSize);
     }
 
+    _view() {
+      const rows = this._rows();
+      const filtered = this._sortedRows(this._filteredRows(rows));
+      const pageCount = Math.max(1, Math.ceil(filtered.length / this._config.pageSize));
+      if (this._page >= pageCount) this._page = pageCount - 1;
+      return {
+        rows,
+        filtered,
+        pageCount,
+        visible: this._visibleRows(filtered),
+      };
+    }
+
     _captureSearchFocus() {
       const active = this.shadowRoot && this.shadowRoot.activeElement;
       if (!active || !active.classList.contains("search")) return null;
@@ -953,11 +966,7 @@
     _render() {
       if (!this.shadowRoot) return;
       const searchFocus = this._captureSearchFocus();
-      const rows = this._rows();
-      const filtered = this._sortedRows(this._filteredRows(rows));
-      const pageCount = Math.max(1, Math.ceil(filtered.length / this._config.pageSize));
-      if (this._page >= pageCount) this._page = pageCount - 1;
-      const visible = this._visibleRows(filtered);
+      const { rows, filtered, pageCount, visible } = this._view();
 
       this.shadowRoot.innerHTML = `
         <style>${css}</style>
@@ -975,6 +984,36 @@
       this._lastPassiveRender = Date.now();
       this._bindEvents();
       this._restoreSearchFocus(searchFocus);
+    }
+
+    _renderResults() {
+      if (!this.shadowRoot) return false;
+      const { rows, filtered, pageCount, visible } = this._view();
+      const tableWrap = this.shadowRoot.querySelector(".tableWrap");
+      if (!tableWrap) return false;
+
+      tableWrap.innerHTML = visible.length
+        ? this._table(visible)
+        : '<div class="empty">No matching Hoymiles entities</div>';
+
+      const summary = this.shadowRoot.querySelector(".summary");
+      if (summary) summary.textContent = `${filtered.length} matched of ${rows.length}`;
+
+      const pager = this.shadowRoot.querySelector(".pager");
+      if (this._config.showPagination) {
+        const pagerHtml = this._pager(filtered.length, pageCount);
+        if (pager) {
+          pager.outerHTML = pagerHtml;
+        } else {
+          this.shadowRoot.querySelector("ha-card").insertAdjacentHTML("beforeend", pagerHtml);
+        }
+      } else if (pager) {
+        pager.remove();
+      }
+
+      this._lastPassiveRender = Date.now();
+      this._bindResultEvents();
+      return true;
     }
 
     _toolbar(rows) {
@@ -1108,7 +1147,7 @@
         search.addEventListener("input", (event) => {
           this._search = event.target.value;
           this._page = 0;
-          this._render();
+          this._renderResults();
         });
       }
 
@@ -1117,7 +1156,7 @@
           const key = event.target.dataset.filter;
           this._filters[key] = event.target.value;
           this._page = 0;
-          this._render();
+          this._renderResults();
         });
       }
 
@@ -1126,10 +1165,15 @@
         pageSize.addEventListener("change", (event) => {
           this._config.pageSize = Number(event.target.value) || DEFAULT_PAGE_SIZE;
           this._page = 0;
-          this._render();
+          this._renderResults();
         });
       }
 
+      this._bindResultEvents();
+    }
+
+    _bindResultEvents() {
+      const root = this.shadowRoot;
       for (const header of root.querySelectorAll("th[data-sort]")) {
         header.addEventListener("click", (event) => {
           const key = event.currentTarget.dataset.sort;
@@ -1138,7 +1182,7 @@
           } else {
             this._sort = { key, dir: "asc" };
           }
-          this._render();
+          this._renderResults();
         });
       }
 
@@ -1146,7 +1190,7 @@
       if (prev) {
         prev.addEventListener("click", () => {
           this._page = Math.max(0, this._page - 1);
-          this._render();
+          this._renderResults();
         });
       }
 
@@ -1154,7 +1198,7 @@
       if (next) {
         next.addEventListener("click", () => {
           this._page += 1;
-          this._render();
+          this._renderResults();
         });
       }
 
