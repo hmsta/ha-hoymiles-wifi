@@ -7,7 +7,12 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
-from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigEntryState,
+    ConfigFlow,
+    ConfigFlowResult,
+)
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
@@ -789,6 +794,24 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                     (claimed_entry, dict(claimed_entry.data), claimed_entry.version)
                     for claimed_entry, _updated_data in claimed_inverter_entry_updates
                 ]
+
+                # Keep the destination's platforms out of the registry transfer.
+                # Otherwise Home Assistant can retain the moved IDs as orphaned
+                # entities instead of letting the destination provide them.
+                target_was_loaded = entry.state is ConfigEntryState.LOADED
+                if target_was_loaded and not await self.hass.config_entries.async_unload(
+                    entry.entry_id
+                ):
+                    _LOGGER.warning(
+                        "Failed to unload Hoymiles entry %s before moving inverter "
+                        "ownership",
+                        entry.entry_id,
+                    )
+                    errors["base"] = "unknown"
+                    result = await self.async_step_reconfigure()
+                    result["errors"] = errors
+                    return result
+
                 self.hass.config_entries.async_update_entry(
                     entry, data=data, version=CONFIG_VERSION
                 )
@@ -823,6 +846,8 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                             await self.hass.config_entries.async_reload(
                                 claimed_entry.entry_id
                             )
+                    if target_was_loaded:
+                        await self.hass.config_entries.async_setup(entry.entry_id)
                     errors["base"] = "unknown"
                 else:
                     transfer_inverter_entity_registry_entries(
@@ -830,7 +855,12 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                         entry.entry_id,
                         detected_inverter_serials,
                     )
-                    if not await self.hass.config_entries.async_reload(entry.entry_id):
+                    target_loaded = await (
+                        self.hass.config_entries.async_setup(entry.entry_id)
+                        if target_was_loaded
+                        else self.hass.config_entries.async_reload(entry.entry_id)
+                    )
+                    if not target_loaded:
                         self.hass.config_entries.async_update_entry(
                             entry, data=old_data, version=old_version
                         )
@@ -860,6 +890,8 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                             await self.hass.config_entries.async_reload(
                                 claimed_entry.entry_id
                             )
+                        if target_was_loaded:
+                            await self.hass.config_entries.async_reload(entry.entry_id)
                         errors["base"] = "unknown"
                     else:
                         return self.async_abort(reason="reconfigure_successful")

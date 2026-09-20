@@ -42,7 +42,7 @@ from custom_components.hoymiles_wifi.config_flow import (
 )
 from custom_components.hoymiles_wifi.error import CannotConnect
 
-from homeassistant.const import CONF_HOST
+from homeassistant.const import CONF_HOST, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr, entity_registry as er
@@ -1086,6 +1086,152 @@ async def test_reconfigure_cross_swap_preserves_both_registry_entities(
         assert current_entry.unique_id.startswith(f"hoymiles_{target_entry.entry_id}_")
         assert current_entry.unique_id.endswith(serial_number)
     assert not any(entity_id.endswith("_2") for entity_id in inverter_entities)
+
+
+async def test_reconfigure_move_reactivates_transferred_entities(
+    hass: HomeAssistant,
+) -> None:
+    """Test a moved inverter is provided by the destination after reconfigure."""
+    old_entry = _add_config_entry(
+        hass,
+        entry_id="old-dtu",
+        dtu_serial_number=DTU_TEST_SERIAL_NUMBER,
+        single_phase_inverters=[INVERTER_A_SERIAL_NUMBER],
+        ports=[
+            {
+                "inverter_serial_number": INVERTER_A_SERIAL_NUMBER,
+                "port_number": port_number,
+            }
+            for port_number in range(1, 5)
+        ],
+    )
+    target_entry = _add_config_entry(
+        hass,
+        entry_id="target-dtu",
+        dtu_serial_number=DTU_SECOND_TEST_SERIAL_NUMBER,
+        single_phase_inverters=[INVERTER_B_SERIAL_NUMBER],
+        ports=[
+            {
+                "inverter_serial_number": INVERTER_B_SERIAL_NUMBER,
+                "port_number": port_number,
+            }
+            for port_number in range(1, 5)
+        ],
+    )
+
+    with (
+        patch(
+            "custom_components.hoymiles_wifi._async_register_frontend",
+            new=AsyncMock(),
+        ),
+        patch(
+            "custom_components.hoymiles_wifi.HoymilesRealDataUpdateCoordinator.schedule_startup_refresh"
+        ),
+        patch(
+            "custom_components.hoymiles_wifi.HoymilesConfigUpdateCoordinator.async_config_entry_first_refresh",
+            new=AsyncMock(),
+        ),
+        patch(
+            "custom_components.hoymiles_wifi.HoymilesAppInfoUpdateCoordinator.async_config_entry_first_refresh",
+            new=AsyncMock(),
+        ),
+        patch(
+            "custom_components.hoymiles_wifi.sensor.HoymilesEnergySensorEntity.schedule_midnight_reset"
+        ),
+    ):
+        assert await hass.config_entries.async_setup(old_entry.entry_id)
+        if target_entry.state is config_entries.ConfigEntryState.NOT_LOADED:
+            assert await hass.config_entries.async_setup(target_entry.entry_id)
+        await hass.async_block_till_done()
+
+        moved_entity_id = f"sensor.inverter_{INVERTER_A_SERIAL_NUMBER}_ac_power"
+        moved_state = hass.states.get(moved_entity_id)
+        assert moved_state is not None
+        assert moved_state.state != STATE_UNAVAILABLE
+
+        flow = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_RECONFIGURE,
+                "entry_id": target_entry.entry_id,
+            },
+        )
+        with (
+            patch(
+                "custom_components.hoymiles_wifi.config_flow.async_get_config_entry_data_for_host",
+                new=AsyncMock(
+                    return_value=_discovered_config_data(
+                        dtu_serial_number=DTU_SECOND_TEST_SERIAL_NUMBER,
+                        single_phase_inverters=[
+                            INVERTER_B_SERIAL_NUMBER,
+                            INVERTER_A_SERIAL_NUMBER,
+                        ],
+                        ports=[
+                            {
+                                "inverter_serial_number": serial_number,
+                                "port_number": port_number,
+                            }
+                            for serial_number in (
+                                INVERTER_B_SERIAL_NUMBER,
+                                INVERTER_A_SERIAL_NUMBER,
+                            )
+                            for port_number in range(1, 5)
+                        ],
+                    )
+                ),
+            ),
+            patch.object(
+                hass.config_entries,
+                "async_unload",
+                wraps=hass.config_entries.async_unload,
+            ) as mock_unload,
+        ):
+            result = await hass.config_entries.flow.async_configure(
+                flow["flow_id"], MOCK_DATA_STEP
+            )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert mock_unload.await_args_list[0] == call(target_entry.entry_id)
+    moved_state = hass.states.get(moved_entity_id)
+    assert moved_state is not None
+    assert moved_state.state != STATE_UNAVAILABLE
+    registry_entry = er.async_get(hass).async_get(moved_entity_id)
+    assert registry_entry.config_entry_id == target_entry.entry_id
+    assert registry_entry.unique_id == (
+        f"hoymiles_{target_entry.entry_id}_{INVERTER_A_SERIAL_NUMBER}_"
+        "sgs_data.active_power"
+    )
+    moved_registry_entries = [
+        entity_entry
+        for entity_entry in er.async_get(hass).entities.values()
+        if INVERTER_A_SERIAL_NUMBER in entity_entry.unique_id
+    ]
+    assert moved_registry_entries
+    assert all(
+        entity_entry.config_entry_id == target_entry.entry_id
+        for entity_entry in moved_registry_entries
+    )
+    for entity_entry in moved_registry_entries:
+        if entity_entry.disabled_by is not None:
+            continue
+        state = hass.states.get(entity_entry.entity_id)
+        assert state is not None
+        assert state.state != STATE_UNAVAILABLE
+    assert not any(
+        entity_entry.entity_id.endswith("_2")
+        for entity_entry in moved_registry_entries
+    )
+
+    device_registry = dr.async_get(hass)
+    moved_device = device_registry.async_get_device(
+        identifiers={(DOMAIN, INVERTER_A_SERIAL_NUMBER)}
+    )
+    target_dtu_device = device_registry.async_get_device(
+        identifiers={(DOMAIN, DTU_SECOND_TEST_SERIAL_NUMBER)}
+    )
+    assert moved_device.config_entries == {target_entry.entry_id}
+    assert moved_device.via_device_id == target_dtu_device.id
 
 
 async def test_reconfigure_does_not_move_when_previous_owner_reload_fails(
