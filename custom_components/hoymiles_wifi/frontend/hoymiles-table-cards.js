@@ -129,6 +129,10 @@
       margin-bottom: 10px;
     }
 
+    .toolbar.inverter {
+      grid-template-columns: minmax(180px, 1fr) repeat(5, minmax(120px, auto));
+    }
+
     input,
     select,
     button {
@@ -261,6 +265,10 @@
       }
 
       .toolbar {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .toolbar.inverter {
         grid-template-columns: 1fr 1fr;
       }
 
@@ -566,6 +574,12 @@
         ));
       }
       if (this._kind === "inverter") {
+        defaultFilters.dtu = normalizeSerial(firstConfigured(
+          configuredFilters.dtu,
+          config && config.dtu,
+          config && config.default_dtu,
+          config && config.defaultDtu,
+        ));
         defaultFilters.state = keyFilter(firstConfigured(
           configuredFilters.state,
           config && config.state,
@@ -891,6 +905,7 @@
       const search = this._search.trim().toLowerCase();
       return rows.filter((row) => {
         if (search && !row.search.includes(search)) return false;
+        if (this._filters.dtu && row.raw.dtu !== this._filters.dtu) return false;
         if (this._filters.location && row.raw.location !== this._filters.location) return false;
         if (this._filters.phase && row.raw.phase !== this._filters.phase) return false;
         if (this._filters.state && row.raw.state !== this._filters.state) return false;
@@ -992,6 +1007,8 @@
       const tableWrap = this.shadowRoot.querySelector(".tableWrap");
       if (!tableWrap) return false;
 
+      this._refreshDynamicFilterOptions(rows);
+
       tableWrap.innerHTML = visible.length
         ? this._table(visible)
         : '<div class="empty">No matching Hoymiles entities</div>';
@@ -1017,6 +1034,7 @@
     }
 
     _toolbar(rows) {
+      const dtuOptions = this._dtuFilterOptions(rows);
       const locationOptions = this._filterOptions(rows, "location");
       const phaseOptions = this._filterOptions(rows, "phase");
       const stateFilter = this._kind === "inverter"
@@ -1030,8 +1048,9 @@
         : "";
 
       return `
-        <div class="toolbar">
+        <div class="toolbar ${this._kind}">
           <input class="search" type="search" placeholder="Search" value="${this._escapeAttr(this._search)}">
+          ${this._kind === "inverter" ? this._select("dtu", "DTU", dtuOptions) : ""}
           ${this._select("location", "Location", locationOptions)}
           ${this._kind !== "dtu" ? this._select("phase", "Phase", phaseOptions) : ""}
           ${stateFilter}${statusFilter}${productionFilter}
@@ -1051,20 +1070,55 @@
     }
 
     _select(key, label, options) {
-      const value = this._filters[key] || "";
       return `
         <select data-filter="${key}" aria-label="${this._escapeAttr(label)}">
-          <option value="">${this._escape(label)}</option>
-          ${options.map((option) => `
-            <option value="${this._escapeAttr(option)}" ${String(option) === String(value) ? "selected" : ""}>
-              ${this._escape(this._optionLabel(option))}
-            </option>
-          `).join("")}
+          ${this._selectOptions(key, label, options)}
         </select>
       `;
     }
 
-    _optionLabel(value) {
+    _selectOptions(key, label, options) {
+      const value = this._filters[key] || "";
+      return `
+        <option value="">${this._escape(label)}</option>
+        ${options.map((option) => `
+          <option value="${this._escapeAttr(option)}" ${String(option) === String(value) ? "selected" : ""}>
+            ${this._escape(this._optionLabel(option, key))}
+          </option>
+        `).join("")}
+      `;
+    }
+
+    _dtuFilterOptions(rows) {
+      if (this._kind !== "inverter") return [];
+      return [...new Set([
+        ...discoverDtuSerials(this._hass),
+        ...this._filterOptions(rows, "dtu"),
+      ])].sort(naturalCompare);
+    }
+
+    _refreshDynamicFilterOptions(rows) {
+      const dynamicFilters = [
+        ["location", "Location", this._filterOptions(rows, "location")],
+      ];
+      if (this._kind !== "dtu") {
+        dynamicFilters.push(["phase", "Phase", this._filterOptions(rows, "phase")]);
+      }
+      if (this._kind === "inverter") {
+        dynamicFilters.push(["dtu", "DTU", this._dtuFilterOptions(rows)]);
+      }
+
+      for (const [key, label, options] of dynamicFilters) {
+        const select = this.shadowRoot.querySelector(`select[data-filter="${key}"]`);
+        if (!select) continue;
+        const optionHtml = this._selectOptions(key, label, options);
+        if (select.innerHTML !== optionHtml) select.innerHTML = optionHtml;
+        select.value = this._filters[key] || "";
+      }
+    }
+
+    _optionLabel(value, key = "") {
+      if (key === "dtu") return String(value).toUpperCase();
       const labels = {
         no_grid: "No grid",
         online: "Online",

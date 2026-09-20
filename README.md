@@ -319,6 +319,7 @@ The table cards read directly from `hass.states`. They discover Hoymiles entitie
 Available table features:
 
 - search
+- DTU filter on the inverter table
 - location and phase filters
 - state/status filters
 - sortable columns
@@ -356,7 +357,7 @@ show_summary: false
 show_pagination: false
 ```
 
-The same `filters` object works on all table cards. Inverter cards accept `search`, `location`, `phase`, and `state`; DTU cards accept `search`, `location`, and `status`; panel cards accept `search`, `location`, `phase`, and `production`. Existing `production_status` is still accepted as a panel-card alias.
+The same `filters` object works on all table cards. Inverter cards accept `search`, `dtu`, `location`, `phase`, and `state`; DTU cards accept `search`, `location`, and `status`; panel cards accept `search`, `location`, `phase`, and `production`. The inverter table's DTU dropdown is populated from the available DTU devices and currently connected inverter rows. Existing `production_status` is still accepted as a panel-card alias.
 
 For DTU tables, `power_limit` resolves to the Home Assistant number entity `number.dtu_<serial>_power_limit`; other common DTU columns such as `ip`, `rssi`, `ac_power`, and `daily_energy` resolve to their matching sensor or binary-sensor entities.
 
