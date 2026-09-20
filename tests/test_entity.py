@@ -240,9 +240,18 @@ async def test_transfer_repairs_stale_inverter_device_config_entry(
     old_entry.add_to_hass(hass)
     target_entry.add_to_hass(hass)
     device_registry = dr.async_get(hass)
+    old_dtu_device = device_registry.async_get_or_create(
+        config_entry_id=old_entry.entry_id,
+        identifiers={(DOMAIN, old_entry.data[CONF_DTU_SERIAL_NUMBER])},
+    )
+    target_dtu_device = device_registry.async_get_or_create(
+        config_entry_id=target_entry.entry_id,
+        identifiers={(DOMAIN, target_entry.data[CONF_DTU_SERIAL_NUMBER])},
+    )
     device = device_registry.async_get_or_create(
         config_entry_id=old_entry.entry_id,
         identifiers={(DOMAIN, serial_number)},
+        via_device=(DOMAIN, old_entry.data[CONF_DTU_SERIAL_NUMBER]),
     )
     device_registry.async_update_device(
         device.id,
@@ -257,6 +266,51 @@ async def test_transfer_repairs_stale_inverter_device_config_entry(
     assert device_registry.async_get(device.id).config_entries == {
         target_entry.entry_id
     }
+    assert device_registry.async_get(device.id).via_device_id == target_dtu_device.id
+    assert device_registry.async_get(device.id).via_device_id != old_dtu_device.id
+
+
+async def test_transfer_repairs_stale_inverter_via_device(
+    hass: HomeAssistant,
+) -> None:
+    """Test a moved inverter with correct ownership gets its new parent DTU."""
+    serial_number = "1421a01a4ffc"
+    old_entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="old-entry",
+        data={CONF_DTU_SERIAL_NUMBER: "4121A0194D6C"},
+    )
+    target_entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="new-entry",
+        data={CONF_DTU_SERIAL_NUMBER: "4121A0194E49"},
+    )
+    old_entry.add_to_hass(hass)
+    target_entry.add_to_hass(hass)
+    device_registry = dr.async_get(hass)
+    old_dtu_device = device_registry.async_get_or_create(
+        config_entry_id=old_entry.entry_id,
+        identifiers={(DOMAIN, old_entry.data[CONF_DTU_SERIAL_NUMBER])},
+    )
+    target_dtu_device = device_registry.async_get_or_create(
+        config_entry_id=target_entry.entry_id,
+        identifiers={(DOMAIN, target_entry.data[CONF_DTU_SERIAL_NUMBER])},
+    )
+    device = device_registry.async_get_or_create(
+        config_entry_id=target_entry.entry_id,
+        identifiers={(DOMAIN, serial_number)},
+        via_device=(DOMAIN, old_entry.data[CONF_DTU_SERIAL_NUMBER]),
+    )
+
+    repaired = transfer_inverter_entity_registry_entries(
+        hass, target_entry.entry_id, {serial_number}
+    )
+
+    assert repaired is True
+    repaired_device = device_registry.async_get(device.id)
+    assert repaired_device.config_entries == {target_entry.entry_id}
+    assert repaired_device.via_device_id == target_dtu_device.id
+    assert repaired_device.via_device_id != old_dtu_device.id
 
 
 @pytest.mark.parametrize(

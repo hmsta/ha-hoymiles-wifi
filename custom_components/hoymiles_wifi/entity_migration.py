@@ -86,8 +86,17 @@ def _repair_inverter_device_registry_entries(
     target_entry_id: str,
     inverter_serials: set[str],
 ) -> bool:
-    """Link inverter devices only to their current Hoymiles config entry."""
+    """Link inverter devices only to their current config entry and DTU."""
     device_registry = dr.async_get(hass)
+    target_entry = hass.config_entries.async_get_entry(target_entry_id)
+    target_dtu_device = None
+    if target_entry is not None and (
+        target_dtu_serial := target_entry.data.get(CONF_DTU_SERIAL_NUMBER)
+    ):
+        target_dtu_device = device_registry.async_get_device(
+            identifiers={(DOMAIN, target_dtu_serial)}
+        )
+
     repaired = False
     for serial_number in inverter_serials:
         device_entry = device_registry.async_get_device(
@@ -104,21 +113,27 @@ def _repair_inverter_device_registry_entries(
             is not None
             and config_entry.domain == DOMAIN
         ]
-        if not stale_entry_ids and target_entry_id in device_entry.config_entries:
+        update_kwargs: dict[str, Any] = {}
+        if target_entry_id not in device_entry.config_entries:
+            update_kwargs["add_config_entry_id"] = target_entry_id
+        if (
+            target_dtu_device is not None
+            and device_entry.via_device_id != target_dtu_device.id
+        ):
+            update_kwargs["via_device_id"] = target_dtu_device.id
+
+        if not stale_entry_ids and not update_kwargs:
             continue
 
-        if not stale_entry_ids:
-            device_registry.async_update_device(
-                device_entry.id,
-                add_config_entry_id=target_entry_id,
-            )
+        if update_kwargs:
+            if stale_entry_ids:
+                update_kwargs["remove_config_entry_id"] = stale_entry_ids.pop(0)
+            device_registry.async_update_device(device_entry.id, **update_kwargs)
             repaired = True
-            continue
 
         for stale_entry_id in stale_entry_ids:
             device_registry.async_update_device(
                 device_entry.id,
-                add_config_entry_id=target_entry_id,
                 remove_config_entry_id=stale_entry_id,
             )
             repaired = True

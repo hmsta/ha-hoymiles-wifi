@@ -923,13 +923,23 @@ async def test_reconfigure_cross_swap_preserves_both_registry_entities(
         ],
     )
     device_registry = dr.async_get(hass)
+    dtu_x_device = device_registry.async_get_or_create(
+        config_entry_id=entry_x.entry_id,
+        identifiers={(DOMAIN, DTU_TEST_SERIAL_NUMBER)},
+    )
+    dtu_y_device = device_registry.async_get_or_create(
+        config_entry_id=entry_y.entry_id,
+        identifiers={(DOMAIN, DTU_SECOND_TEST_SERIAL_NUMBER)},
+    )
     device_a = device_registry.async_get_or_create(
         config_entry_id=entry_x.entry_id,
         identifiers={(DOMAIN, INVERTER_A_SERIAL_NUMBER)},
+        via_device=(DOMAIN, DTU_TEST_SERIAL_NUMBER),
     )
     device_b = device_registry.async_get_or_create(
         config_entry_id=entry_y.entry_id,
         identifiers={(DOMAIN, INVERTER_B_SERIAL_NUMBER)},
+        via_device=(DOMAIN, DTU_SECOND_TEST_SERIAL_NUMBER),
     )
     registry = er.async_get(hass)
     entity_a = registry.async_get_or_create(
@@ -1062,6 +1072,8 @@ async def test_reconfigure_cross_swap_preserves_both_registry_entities(
     )
     assert device_registry.async_get(device_a.id).config_entries == {entry_y.entry_id}
     assert device_registry.async_get(device_b.id).config_entries == {entry_x.entry_id}
+    assert device_registry.async_get(device_a.id).via_device_id == dtu_y_device.id
+    assert device_registry.async_get(device_b.id).via_device_id == dtu_x_device.id
     for button_entity in button_entities:
         serial_number = (
             INVERTER_A_SERIAL_NUMBER
