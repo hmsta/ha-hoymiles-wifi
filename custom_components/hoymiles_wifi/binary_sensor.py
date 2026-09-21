@@ -100,7 +100,14 @@ class HoymilesInverterSensorEntity(HoymilesCoordinatorEntity, BinarySensorEntity
         return self._native_value
 
     def update_state_value(self):
-        """Update the state value of the binary sensor based on the DTU's network state."""
+        """Update connectivity from the latest real-data poll completeness."""
+        poll_successful = getattr(
+            self.coordinator, "real_data_poll_successful", None
+        )
+        if poll_successful is not None:
+            self._native_value = poll_successful
+            return
+
         dtu_state = self._dtu.get_state()
         if dtu_state == NetworkState.Online:
             self._native_value = True

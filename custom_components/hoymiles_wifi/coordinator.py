@@ -33,6 +33,11 @@ REAL_DATA_PAGE_RETRIES = 3
 class IncompleteRealDataError(Exception):
     """Raised when a DTU real-data snapshot is missing or internally inconsistent."""
 
+    def __init__(self, message: str, partial_response) -> None:
+        """Initialize the error with every page that was received successfully."""
+        super().__init__(message)
+        self.partial_response = partial_response
+
 
 def _real_data_page_error(
     response,
@@ -69,19 +74,21 @@ async def _async_get_complete_real_data_new(
     dtu: DTU,
     expected_dtu_serial: str | None = None,
     retries: int = REAL_DATA_PAGE_RETRIES,
+    expected_pages_hint: int | None = None,
 ):
-    """Fetch every real-data page and reject incomplete snapshots.
+    """Fetch every real-data page and report any missing pages.
 
     hoymiles-wifi 0.5.5 silently skips a page when one of the follow-up
-    requests returns ``None``.  Publishing that partial protobuf makes every
-    inverter carried by the missed page appear to have vanished.  Fetch and
-    validate the pages here until the library provides equivalent guarantees.
+    requests returns ``None``. Fetch and validate every page here, retaining
+    successful pages so they can be combined with the previous snapshot when
+    another page remains unavailable after retries.
     """
     if retries < 1:
         raise ValueError("retries must be at least 1")
 
     combined_response = RealDataNew_pb2.RealDataNewReqDTO()
     expected_pages: int | None = None
+    failed_pages: list[str] = []
 
     page = 0
     while expected_pages is None or page < expected_pages:
@@ -122,9 +129,17 @@ async def _async_get_complete_real_data_new(
 
         if page_response is None:
             detail = "; ".join(failures) or "unknown failure"
-            raise IncompleteRealDataError(
-                f"real-data page cp={page} failed after {retries} attempts: {detail}"
+            failed_pages.append(
+                f"cp={page} failed after {retries} attempts: {detail}"
             )
+            if expected_pages is None:
+                if expected_pages_hint is None:
+                    raise IncompleteRealDataError(
+                        f"real-data page {failed_pages[0]}", combined_response
+                    )
+                expected_pages = max(1, expected_pages_hint)
+            page += 1
+            continue
 
         if expected_pages is None:
             expected_pages = max(1, int(page_response.ap))
@@ -132,7 +147,62 @@ async def _async_get_complete_real_data_new(
         combined_response.MergeFrom(page_response)
         page += 1
 
+    if failed_pages:
+        raise IncompleteRealDataError(
+            "real-data pages incomplete: " + " | ".join(failed_pages),
+            combined_response,
+        )
+
     return combined_response
+
+
+_REAL_DATA_RECORD_KEYS = {
+    "meter_data": ("serial_number", "device_type"),
+    "rp_data": ("serial_number",),
+    "rsd_data": ("serial_number",),
+    "sgs_data": ("serial_number",),
+    "tgs_data": ("serial_number",),
+    "pv_data": ("serial_number", "port_number"),
+}
+
+
+def _merge_partial_real_data(previous, partial):
+    """Keep fresh records and fill only missing records from the last snapshot."""
+    if partial.ByteSize() == 0:
+        return previous
+
+    merged = RealDataNew_pb2.RealDataNewReqDTO()
+    merged.CopyFrom(partial)
+    fresh_inverter_serials = {
+        record.serial_number
+        for field_name in ("rsd_data", "sgs_data", "tgs_data")
+        for record in getattr(partial, field_name)
+    }
+
+    for field_name, key_fields in _REAL_DATA_RECORD_KEYS.items():
+        merged_records = getattr(merged, field_name)
+        fresh_keys = {
+            tuple(getattr(record, key) for key in key_fields)
+            for record in merged_records
+        }
+        for previous_record in getattr(previous, field_name):
+            record_key = tuple(
+                getattr(previous_record, key) for key in key_fields
+            )
+            if record_key in fresh_keys:
+                continue
+            if (
+                field_name == "pv_data"
+                and previous_record.serial_number in fresh_inverter_serials
+            ):
+                # A fresh inverter-level row is authoritative. In particular,
+                # do not resurrect old per-port production after that row says
+                # the inverter is offline and therefore omits its PV rows.
+                continue
+            merged_records.add().CopyFrom(previous_record)
+            fresh_keys.add(record_key)
+
+    return merged
 
 
 def _stagger_sort_key(config_entry: ConfigEntry) -> tuple[str, str]:
@@ -245,6 +315,7 @@ class HoymilesRealDataUpdateCoordinator(HoymilesDataUpdateCoordinator):
         self._startup_cooldown = startup_cooldown
         self._startup_refresh_pending = True
         self._last_real_data_poll_monotonic: float | None = None
+        self._real_data_poll_successful: bool | None = None
         self._shared_meter_coordinator = shared_meter_coordinator
         super().__init__(hass, dtu, config_entry, update_interval)
 
@@ -325,6 +396,11 @@ class HoymilesRealDataUpdateCoordinator(HoymilesDataUpdateCoordinator):
         """Return whether the delayed first real-data refresh has not run yet."""
         return self._startup_refresh_pending
 
+    @property
+    def real_data_poll_successful(self) -> bool | None:
+        """Return whether the latest complete real-data poll succeeded."""
+        return self._real_data_poll_successful
+
     def _stagger_epoch(self) -> float:
         """Return the shared monotonic epoch used for all Hoymiles DTU slots."""
         domain_data = self._hass.data.setdefault(DOMAIN, {})
@@ -334,19 +410,33 @@ class HoymilesRealDataUpdateCoordinator(HoymilesDataUpdateCoordinator):
         )
 
     async def _async_update_data(self):
-        """Update data without publishing incomplete multi-page snapshots."""
+        """Update fresh records without dropping records behind a failed page."""
         _LOGGER.debug("Hoymiles data coordinator update")
         self._startup_refresh_pending = False
         self._last_real_data_poll_monotonic = self._hass.loop.time()
 
         expected_dtu_serial = self._config_entry.data.get(CONF_DTU_SERIAL_NUMBER)
+        expected_pages_hint = (
+            max(1, int(self.data.ap))
+            if self.data is not None and getattr(self.data, "ap", 0)
+            else None
+        )
         try:
             response = await _async_get_complete_real_data_new(
                 self._dtu,
                 expected_dtu_serial=expected_dtu_serial,
+                expected_pages_hint=expected_pages_hint,
             )
         except IncompleteRealDataError as exc:
-            raise UpdateFailed(str(exc)) from exc
+            self._real_data_poll_successful = False
+            if self.data is not None:
+                response = _merge_partial_real_data(
+                    self.data, exc.partial_response
+                )
+            else:
+                raise UpdateFailed(str(exc)) from exc
+        else:
+            self._real_data_poll_successful = True
 
         if response and self._shared_meter_coordinator is not None:
             self._shared_meter_coordinator.update_from_real_data(

@@ -8,6 +8,7 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from hoymiles_wifi.protobuf import RealDataNew_pb2
 import pytest
 
+from custom_components.hoymiles_wifi.binary_sensor import HoymilesInverterSensorEntity
 from custom_components.hoymiles_wifi.const import (
     CONF_DTU_SERIAL_NUMBER,
     CONF_INVERTERS,
@@ -19,6 +20,7 @@ from custom_components.hoymiles_wifi.coordinator import (
     HoymilesRealDataUpdateCoordinator,
     IncompleteRealDataError,
     _async_get_complete_real_data_new,
+    _merge_partial_real_data,
     _next_staggered_refresh_time,
     _stagger_slot_for_entries,
     _uses_real_data_coordinator,
@@ -131,7 +133,7 @@ async def test_complete_real_data_fetch_rejects_partial_snapshot() -> None:
     with pytest.raises(IncompleteRealDataError, match="cp=1 failed"):
         await _async_get_complete_real_data_new(dtu, retries=2)
 
-    assert dtu.requested_pages == [0, 1, 1]
+    assert dtu.requested_pages == [0, 1, 1, 2]
 
 
 @pytest.mark.asyncio
@@ -152,8 +154,8 @@ async def test_complete_real_data_fetch_retries_wrong_page() -> None:
 
 
 @pytest.mark.asyncio
-async def test_coordinator_rejects_partial_poll_after_prior_success() -> None:
-    """Test an incomplete poll fails without replacing the previous snapshot."""
+async def test_coordinator_retains_values_and_marks_dtu_after_partial_poll() -> None:
+    """Test a failed poll preserves values while marking DTU diagnostics failed."""
     previous = _real_data_page(0, total_pages=1)
     dtu = _PagedDtu({0: [None, None, None]})
     coordinator = SimpleNamespace(
@@ -168,13 +170,83 @@ async def test_coordinator_rejects_partial_poll_after_prior_success() -> None:
         _shared_meter_coordinator=None,
         _startup_refresh_pending=True,
         _last_real_data_poll_monotonic=None,
+        _real_data_poll_successful=True,
         data=previous,
     )
 
-    with pytest.raises(UpdateFailed, match="cp=0 failed"):
-        await HoymilesRealDataUpdateCoordinator._async_update_data(coordinator)
+    response = await HoymilesRealDataUpdateCoordinator._async_update_data(coordinator)
 
+    assert response is previous
     assert coordinator.data is previous
+    assert coordinator._real_data_poll_successful is False
+
+
+@pytest.mark.asyncio
+async def test_coordinator_updates_fresh_pages_and_retains_only_missing_records() -> None:
+    """Test successful pages update while a failed page keeps its previous records."""
+    previous = RealDataNew_pb2.RealDataNewReqDTO()
+    for page in range(3):
+        previous.MergeFrom(_real_data_page(page))
+
+    fresh_page_0 = _real_data_page(0)
+    fresh_page_0.sgs_data[0].modulation_index_signal = -80
+    fresh_page_2 = _real_data_page(2)
+    fresh_page_2.sgs_data[0].modulation_index_signal = -82
+    dtu = _PagedDtu(
+        {
+            0: [fresh_page_0],
+            1: [None, None, None],
+            2: [fresh_page_2],
+        }
+    )
+    coordinator = SimpleNamespace(
+        _dtu=dtu,
+        _hass=SimpleNamespace(loop=SimpleNamespace(time=lambda: 123.0)),
+        _config_entry=SimpleNamespace(
+            data={
+                CONF_DTU_SERIAL_NUMBER: "4121a01953c8",
+                CONF_HOST: "192.168.10.250",
+            }
+        ),
+        _shared_meter_coordinator=None,
+        _startup_refresh_pending=False,
+        _last_real_data_poll_monotonic=None,
+        _real_data_poll_successful=True,
+        data=previous,
+    )
+
+    response = await HoymilesRealDataUpdateCoordinator._async_update_data(coordinator)
+    signals = {
+        item.serial_number: item.modulation_index_signal
+        for item in response.sgs_data
+    }
+
+    assert dtu.requested_pages == [0, 1, 1, 1, 2]
+    assert signals == {
+        22134652552485: -80,
+        22134652552486: -71,
+        22134652552487: -82,
+    }
+    assert coordinator._real_data_poll_successful is False
+
+
+def test_fresh_offline_record_replaces_previous_live_record() -> None:
+    """Test a received offline record is authoritative rather than backfilled."""
+    previous = _real_data_page(0, total_pages=1)
+    previous_pv = previous.pv_data.add()
+    previous_pv.serial_number = previous.sgs_data[0].serial_number
+    previous_pv.port_number = 1
+    previous_pv.power = 500
+    partial = _real_data_page(0, total_pages=1)
+    partial.sgs_data[0].modulation_index_signal = 0
+    partial.sgs_data[0].link_status = 0
+
+    merged = _merge_partial_real_data(previous, partial)
+
+    assert len(merged.sgs_data) == 1
+    assert merged.sgs_data[0].modulation_index_signal == 0
+    assert merged.sgs_data[0].link_status == 0
+    assert len(merged.pv_data) == 0
 
 
 @pytest.mark.asyncio
@@ -193,11 +265,59 @@ async def test_coordinator_first_incomplete_poll_raises_update_failed() -> None:
         _shared_meter_coordinator=None,
         _startup_refresh_pending=True,
         _last_real_data_poll_monotonic=None,
+        _real_data_poll_successful=None,
         data=None,
     )
 
     with pytest.raises(UpdateFailed, match="cp=0 failed"):
         await HoymilesRealDataUpdateCoordinator._async_update_data(coordinator)
+
+    assert coordinator._real_data_poll_successful is False
+
+
+@pytest.mark.asyncio
+async def test_coordinator_complete_poll_marks_dtu_connected() -> None:
+    """Test a complete snapshot restores the DTU diagnostic state."""
+    dtu = _PagedDtu({0: [_real_data_page(0, total_pages=1)]})
+    coordinator = SimpleNamespace(
+        _dtu=dtu,
+        _hass=SimpleNamespace(loop=SimpleNamespace(time=lambda: 123.0)),
+        _config_entry=SimpleNamespace(
+            data={
+                CONF_DTU_SERIAL_NUMBER: "4121a01953c8",
+                CONF_HOST: "192.168.10.250",
+            }
+        ),
+        _shared_meter_coordinator=None,
+        _startup_refresh_pending=False,
+        _last_real_data_poll_monotonic=None,
+        _real_data_poll_successful=False,
+        data=_real_data_page(0, total_pages=1),
+    )
+
+    response = await HoymilesRealDataUpdateCoordinator._async_update_data(coordinator)
+
+    assert response is not coordinator.data
+    assert coordinator._real_data_poll_successful is True
+
+
+@pytest.mark.parametrize("poll_successful", [False, True])
+def test_dtu_connectivity_reports_complete_poll_result(poll_successful: bool) -> None:
+    """Test only the DTU diagnostic exposes logical poll success or failure."""
+    entity = SimpleNamespace(
+        coordinator=SimpleNamespace(real_data_poll_successful=poll_successful),
+        _dtu=SimpleNamespace(
+            get_state=lambda: pytest.fail(
+                "raw DTU state should not override a known logical poll result"
+            )
+        ),
+        _native_value=None,
+    )
+
+    HoymilesInverterSensorEntity.update_state_value(entity)
+
+    assert entity._native_value is poll_successful
+
 
 def test_stagger_slots_are_evenly_spaced_by_sorted_dtu_serial() -> None:
     """Test four DTUs are spread evenly across one update interval."""
