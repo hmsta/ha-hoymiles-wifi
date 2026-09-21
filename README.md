@@ -292,6 +292,11 @@ The card does not expose one selector per panel. It reads the panel positions fr
 
 Hoymiles serial numbers from the layout JSON are lowercased before building these entity IDs.
 
+Each configured single- or three-phase inverter also exposes a diagnostic
+`sensor.inverter_<serial>_link_status` entity containing the raw DTU value.
+This sensor is currently intended for comparison and diagnostics; the layout
+map does not use it to determine reachability.
+
 Use the `RSSI`/`W`/`Wh` buttons on the card to switch between inverter signal strength, current DC power, and daily DC energy. Values are rounded to whole digits. In `RSSI` mode, panels are hidden and one signal marker is shown per inverter at `signal_anchor_port` (`3` by default). If `rssi_ok_dbm` and `rssi_bad_dbm` are both set, signal icons are green at or above `rssi_ok_dbm`, orange between the thresholds, and red at or below `rssi_bad_dbm`; missing, unavailable, or non-negative RSSI values are treated as offline/gray. Without valid thresholds the card keeps its default signal coloring. In `W` mode, panel fill uses `max_watts` as the 100% reference. In `Wh` mode, panel fill uses the highest visible panel daily-energy value as the 100% reference, ignoring values below `off_threshold_watts` so ghost production stays dark/off.
 
 Set `height` to override the default aspect-ratio sizing, for example `height: 80vh` or `height: calc(100dvh - 120px)` for a phone dashboard. The aliases `map_height` and `card_height` are also accepted. Set `initial_zoom` for the starting zoom and `max_zoom` to allow deeper pinch/wheel zoom; the defaults are `1` and `15`. Set `panel_text_min_size` to control the rendered panel size where values and serial labels start showing; lower values show text sooner, and the default is `30`.

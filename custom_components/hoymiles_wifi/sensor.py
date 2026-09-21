@@ -115,6 +115,7 @@ class HoymilesSensorEntityDescription(
     version_translation_function: str = None
     version_prefix: str = None
     assume_state: bool = False
+    zero_is_valid: bool = False
     requires_device_type: int = DeviceType.ALL_DEVICES
     force_keep_maximum_within_day: bool = False
 
@@ -249,6 +250,13 @@ HOYMILES_SENSORS = [
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     HoymilesSensorEntityDescription(
+        key="sgs_data[<inverter_count>].link_status",
+        translation_key="link_status",
+        icon="mdi:lan-connect",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        zero_is_valid=True,
+    ),
+    HoymilesSensorEntityDescription(
         key="sgs_data[<inverter_count>].warning_number",
         translation_key="inverter_warning_number",
         entity_registry_enabled_default=False,
@@ -372,6 +380,13 @@ HOYMILES_SENSORS = [
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    HoymilesSensorEntityDescription(
+        key="tgs_data[<inverter_count>].link_status",
+        translation_key="link_status",
+        icon="mdi:lan-connect",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        zero_is_valid=True,
     ),
     HoymilesSensorEntityDescription(
         key="tgs_data[<inverter_count>].warning_number",
@@ -1613,7 +1628,7 @@ class HoymilesDataSensorEntity(HoymilesCoordinatorEntity, RestoreSensor):
     @property
     def native_value(self):
         """Return the native value of the sensor."""
-        if self._native_value == 0.0:
+        if self._native_value == 0.0 and not self.entity_description.zero_is_valid:
             if self.entity_description.assume_state:
                 return self._last_known_value
             elif (
