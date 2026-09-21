@@ -4,6 +4,9 @@ import inspect
 from types import SimpleNamespace
 
 from homeassistant.const import CONF_HOST
+from homeassistant.helpers.update_coordinator import UpdateFailed
+from hoymiles_wifi.protobuf import RealDataNew_pb2
+import pytest
 
 from custom_components.hoymiles_wifi.const import (
     CONF_DTU_SERIAL_NUMBER,
@@ -14,6 +17,8 @@ from custom_components.hoymiles_wifi.const import (
 )
 from custom_components.hoymiles_wifi.coordinator import (
     HoymilesRealDataUpdateCoordinator,
+    IncompleteRealDataError,
+    _async_get_complete_real_data_new,
     _next_staggered_refresh_time,
     _stagger_slot_for_entries,
     _uses_real_data_coordinator,
@@ -38,6 +43,161 @@ def _entry(entry_id: str, dtu_serial_number: str):
         },
     )
 
+
+def _real_data_page(
+    page: int,
+    total_pages: int = 3,
+    dtu_serial: str = "4121A01953C8",
+):
+    """Build one get-real-data-new response page."""
+    response = RealDataNew_pb2.RealDataNewReqDTO(
+        device_serial_number=dtu_serial,
+        timestamp=100,
+        ap=total_pages,
+        cp=page,
+    )
+    inverter = response.sgs_data.add()
+    inverter.serial_number = 22134652552485 + page
+    inverter.modulation_index_signal = -70 - page
+    return response
+
+
+class _PagedDtu:
+    """Return predefined outcomes for each requested real-data page."""
+
+    def __init__(self, outcomes):
+        self.outcomes = {page: list(values) for page, values in outcomes.items()}
+        self.requested_pages = []
+
+    async def async_send_request(self, command, request, response_type):
+        self.requested_pages.append(request.cp)
+        outcome = self.outcomes[request.cp].pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+@pytest.mark.asyncio
+async def test_complete_real_data_fetch_requires_every_page() -> None:
+    """Test all advertised pages are fetched and merged."""
+    dtu = _PagedDtu(
+        {
+            0: [_real_data_page(0)],
+            1: [_real_data_page(1)],
+            2: [_real_data_page(2)],
+        }
+    )
+
+    response = await _async_get_complete_real_data_new(
+        dtu, expected_dtu_serial="4121a01953c8", retries=2
+    )
+
+    assert dtu.requested_pages == [0, 1, 2]
+    assert [item.modulation_index_signal for item in response.sgs_data] == [
+        -70,
+        -71,
+        -72,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_complete_real_data_fetch_retries_a_missing_page() -> None:
+    """Test a transient missing page is retried before publishing."""
+    dtu = _PagedDtu(
+        {
+            0: [_real_data_page(0)],
+            1: [None, _real_data_page(1)],
+            2: [_real_data_page(2)],
+        }
+    )
+
+    response = await _async_get_complete_real_data_new(dtu, retries=2)
+
+    assert dtu.requested_pages == [0, 1, 1, 2]
+    assert len(response.sgs_data) == 3
+
+
+@pytest.mark.asyncio
+async def test_complete_real_data_fetch_rejects_partial_snapshot() -> None:
+    """Test an unrecoverable missing page is never returned as valid data."""
+    dtu = _PagedDtu(
+        {
+            0: [_real_data_page(0)],
+            1: [None, None],
+            2: [_real_data_page(2)],
+        }
+    )
+
+    with pytest.raises(IncompleteRealDataError, match="cp=1 failed"):
+        await _async_get_complete_real_data_new(dtu, retries=2)
+
+    assert dtu.requested_pages == [0, 1, 1]
+
+
+@pytest.mark.asyncio
+async def test_complete_real_data_fetch_retries_wrong_page() -> None:
+    """Test a DTU response carrying the wrong cp value is not merged."""
+    dtu = _PagedDtu(
+        {
+            0: [_real_data_page(0)],
+            1: [_real_data_page(2), _real_data_page(1)],
+            2: [_real_data_page(2)],
+        }
+    )
+
+    response = await _async_get_complete_real_data_new(dtu, retries=2)
+
+    assert dtu.requested_pages == [0, 1, 1, 2]
+    assert len(response.sgs_data) == 3
+
+
+@pytest.mark.asyncio
+async def test_coordinator_rejects_partial_poll_after_prior_success() -> None:
+    """Test an incomplete poll fails without replacing the previous snapshot."""
+    previous = _real_data_page(0, total_pages=1)
+    dtu = _PagedDtu({0: [None, None, None]})
+    coordinator = SimpleNamespace(
+        _dtu=dtu,
+        _hass=SimpleNamespace(loop=SimpleNamespace(time=lambda: 123.0)),
+        _config_entry=SimpleNamespace(
+            data={
+                CONF_DTU_SERIAL_NUMBER: "4121a01953c8",
+                CONF_HOST: "192.168.10.250",
+            }
+        ),
+        _shared_meter_coordinator=None,
+        _startup_refresh_pending=True,
+        _last_real_data_poll_monotonic=None,
+        data=previous,
+    )
+
+    with pytest.raises(UpdateFailed, match="cp=0 failed"):
+        await HoymilesRealDataUpdateCoordinator._async_update_data(coordinator)
+
+    assert coordinator.data is previous
+
+
+@pytest.mark.asyncio
+async def test_coordinator_first_incomplete_poll_raises_update_failed() -> None:
+    """Test no synthetic empty snapshot is published before any good data exists."""
+    dtu = _PagedDtu({0: [None, None, None]})
+    coordinator = SimpleNamespace(
+        _dtu=dtu,
+        _hass=SimpleNamespace(loop=SimpleNamespace(time=lambda: 123.0)),
+        _config_entry=SimpleNamespace(
+            data={
+                CONF_DTU_SERIAL_NUMBER: "4121a01953c8",
+                CONF_HOST: "192.168.10.250",
+            }
+        ),
+        _shared_meter_coordinator=None,
+        _startup_refresh_pending=True,
+        _last_real_data_poll_monotonic=None,
+        data=None,
+    )
+
+    with pytest.raises(UpdateFailed, match="cp=0 failed"):
+        await HoymilesRealDataUpdateCoordinator._async_update_data(coordinator)
 
 def test_stagger_slots_are_evenly_spaced_by_sorted_dtu_serial() -> None:
     """Test four DTUs are spread evenly across one update interval."""

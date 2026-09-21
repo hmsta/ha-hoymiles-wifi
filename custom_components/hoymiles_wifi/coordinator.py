@@ -1,18 +1,18 @@
 """Coordinator for Hoymiles integration."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from math import ceil
 import logging
+import time
 
 import homeassistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import callback
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from hoymiles_wifi.const import CMD_REAL_RES_DTO, OFFSET
 from hoymiles_wifi.dtu import DTU
-from .util import is_encrypted_dtu, async_check_and_update_enc_rand
-
-
+from hoymiles_wifi.protobuf import RealDataNew_pb2
 from .const import (
     CONF_DTU_SERIAL_NUMBER,
     CONF_INVERTERS,
@@ -21,11 +21,118 @@ from .const import (
     DOMAIN,
     HASS_REAL_DATA_STAGGER_EPOCH,
 )
+from .util import async_check_and_update_enc_rand, is_encrypted_dtu
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SENSOR, Platform.NUMBER, Platform.BINARY_SENSOR, Platform.BUTTON]
 SCHEDULE_TOLERANCE_SECONDS = 1.0
+REAL_DATA_PAGE_RETRIES = 3
+
+
+class IncompleteRealDataError(Exception):
+    """Raised when a DTU real-data snapshot is missing or internally inconsistent."""
+
+
+def _real_data_page_error(
+    response,
+    expected_page: int,
+    expected_pages: int | None,
+    expected_dtu_serial: str | None,
+) -> str | None:
+    """Return a validation error for one real-data page, if any."""
+    if response is None:
+        return "no response"
+
+    returned_page = int(response.cp)
+    if returned_page != expected_page:
+        return f"requested cp={expected_page}, received cp={returned_page}"
+
+    returned_pages = max(1, int(response.ap))
+    if expected_pages is not None and returned_pages != expected_pages:
+        return (
+            f"expected ap={expected_pages}, received ap={returned_pages} "
+            f"for cp={expected_page}"
+        )
+
+    returned_dtu_serial = str(response.device_serial_number or "").upper()
+    if expected_dtu_serial and returned_dtu_serial != expected_dtu_serial.upper():
+        return (
+            f"expected DTU {expected_dtu_serial.upper()}, received "
+            f"{returned_dtu_serial or '<empty>'} for cp={expected_page}"
+        )
+
+    return None
+
+
+async def _async_get_complete_real_data_new(
+    dtu: DTU,
+    expected_dtu_serial: str | None = None,
+    retries: int = REAL_DATA_PAGE_RETRIES,
+):
+    """Fetch every real-data page and reject incomplete snapshots.
+
+    hoymiles-wifi 0.5.5 silently skips a page when one of the follow-up
+    requests returns ``None``.  Publishing that partial protobuf makes every
+    inverter carried by the missed page appear to have vanished.  Fetch and
+    validate the pages here until the library provides equivalent guarantees.
+    """
+    if retries < 1:
+        raise ValueError("retries must be at least 1")
+
+    combined_response = RealDataNew_pb2.RealDataNewReqDTO()
+    expected_pages: int | None = None
+
+    page = 0
+    while expected_pages is None or page < expected_pages:
+        failures: list[str] = []
+        page_response = None
+
+        for attempt in range(1, retries + 1):
+            request = RealDataNew_pb2.RealDataNewResDTO()
+            request.time_ymd_hms = datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ).encode("utf-8")
+            request.offset = OFFSET
+            request.time = int(time.time())
+            request.cp = page
+
+            try:
+                candidate = await dtu.async_send_request(
+                    CMD_REAL_RES_DTO,
+                    request,
+                    RealDataNew_pb2.RealDataNewReqDTO,
+                )
+            except Exception as exc:  # Protocol/parse failures are retryable.
+                failures.append(f"attempt {attempt}: {type(exc).__name__}: {exc}")
+                continue
+
+            validation_error = _real_data_page_error(
+                candidate,
+                page,
+                expected_pages,
+                expected_dtu_serial,
+            )
+            if validation_error is not None:
+                failures.append(f"attempt {attempt}: {validation_error}")
+                continue
+
+            page_response = candidate
+            break
+
+        if page_response is None:
+            detail = "; ".join(failures) or "unknown failure"
+            raise IncompleteRealDataError(
+                f"real-data page cp={page} failed after {retries} attempts: {detail}"
+            )
+
+        if expected_pages is None:
+            expected_pages = max(1, int(page_response.ap))
+
+        combined_response.MergeFrom(page_response)
+        page += 1
+
+    return combined_response
 
 
 def _stagger_sort_key(config_entry: ConfigEntry) -> tuple[str, str]:
@@ -227,21 +334,23 @@ class HoymilesRealDataUpdateCoordinator(HoymilesDataUpdateCoordinator):
         )
 
     async def _async_update_data(self):
-        """Update data via library."""
+        """Update data without publishing incomplete multi-page snapshots."""
         _LOGGER.debug("Hoymiles data coordinator update")
         self._startup_refresh_pending = False
         self._last_real_data_poll_monotonic = self._hass.loop.time()
 
-        response = await self._dtu.async_get_real_data_new()
+        expected_dtu_serial = self._config_entry.data.get(CONF_DTU_SERIAL_NUMBER)
+        try:
+            response = await _async_get_complete_real_data_new(
+                self._dtu,
+                expected_dtu_serial=expected_dtu_serial,
+            )
+        except IncompleteRealDataError as exc:
+            raise UpdateFailed(str(exc)) from exc
 
         if response and self._shared_meter_coordinator is not None:
             self._shared_meter_coordinator.update_from_real_data(
                 response, self._config_entry
-            )
-
-        if not response:
-            _LOGGER.debug(
-                "Unable to retrieve real data new. Inverter might be offline."
             )
         return response
 
