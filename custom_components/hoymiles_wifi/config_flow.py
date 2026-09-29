@@ -195,6 +195,25 @@ def _filter_duplicate_meters(
     ]
 
 
+def _merge_reconfigured_meters(
+    existing: list[dict], detected: list[dict]
+) -> list[dict]:
+    """Keep meter ownership when a single discovery response omits the meter.
+
+    All DTUs can feed the shared meter coordinator. Missing from this DTU's
+    current response is not evidence that the physical meter was removed.
+    Explicit device removal remains the way to release ownership.
+    """
+    merged = {
+        str(meter["meter_serial_number"]).lower(): dict(meter)
+        for meter in existing
+    }
+    for meter in detected:
+        serial = str(meter["meter_serial_number"]).lower()
+        merged[serial] = {**merged.get(serial, {}), **meter}
+    return list(merged.values())
+
+
 def _normalize_serial(serial_number: Any) -> str:
     """Normalize a serial number for comparisons."""
     return str(serial_number or "").strip().lower()
@@ -719,9 +738,12 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "cannot_connect"
 
             if not errors:
-                meters = _apply_meter_type_override(meters, meter_type)
                 if dtu_sn != entry.unique_id:
                     return self.async_abort(reason="another_device")
+                meters = _merge_reconfigured_meters(
+                    entry.data.get(CONF_METERS, []), meters
+                )
+                meters = _apply_meter_type_override(meters, meter_type)
                 meters = _filter_duplicate_meters(self.hass, meters, entry.entry_id)
                 detected_inverter_serials = _detected_inverter_serials(
                     single_phase_inverters,

@@ -58,6 +58,7 @@ from .coordinator import (
 )
 from .entity_migration import (
     async_migrate_entity_unique_ids,
+    migrate_meter_entity_registry_entries,
     transfer_inverter_entity_registry_entries,
 )
 from .layout_metadata import (
@@ -451,6 +452,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     """Set up this integration using UI."""
 
     await _async_register_frontend(hass)
+    migrate_meter_entity_registry_entries(hass, config_entry)
     transfer_inverter_entity_registry_entries(
         hass,
         config_entry.entry_id,

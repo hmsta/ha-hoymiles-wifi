@@ -36,6 +36,7 @@ from custom_components.hoymiles_wifi.const import (
 from custom_components.hoymiles_wifi.config_flow import (
     _claimed_inverter_metadata,
     _detected_inverter_serials,
+    _filter_duplicate_meters,
     _metadata_entity_unique_ids,
     _metadata_map_to_text,
     _remove_claimed_inverters_from_data,
@@ -498,10 +499,16 @@ async def test_form_skips_meter_known_by_another_dtu(hass: HomeAssistant) -> Non
     assert result2["data"][CONF_METERS] == []
 
 
-async def test_reconfigure_keeps_own_meter(hass: HomeAssistant) -> None:
-    """Test reconfigure ignores the current entry when filtering meters."""
+@pytest.mark.parametrize("meter_present", [True, False])
+async def test_reconfigure_keeps_own_meter(
+    hass: HomeAssistant, meter_present: bool
+) -> None:
+    """A missing discovery sample must not release the existing meter owner."""
 
     entry = _add_config_entry_with_meter(hass)
+    real_data = _real_data_with_meter()
+    if not meter_present:
+        real_data.ClearField("meter_data")
 
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
@@ -515,7 +522,7 @@ async def test_reconfigure_keeps_own_meter(hass: HomeAssistant) -> None:
         patch.object(hass.config_entries, "async_reload", return_value=True),
         patch(
             "hoymiles_wifi.dtu.DTU.async_get_real_data_new",
-            return_value=_real_data_with_meter(),
+            return_value=real_data,
         ),
     ):
         result2 = await hass.config_entries.flow.async_configure(
@@ -529,6 +536,11 @@ async def test_reconfigure_keeps_own_meter(hass: HomeAssistant) -> None:
     assert entry.data[CONF_METERS] == [
         {"meter_serial_number": METER_SERIAL_NUMBER, "device_type": 1}
     ]
+    assert _filter_duplicate_meters(
+        hass,
+        [{"meter_serial_number": METER_SERIAL_NUMBER, "device_type": 1}],
+        "another-dtu",
+    ) == []
 
 
 async def test_reconfigure_stores_filtered_metadata_dicts(

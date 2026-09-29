@@ -11,7 +11,9 @@ from homeassistant.components.binary_sensor import DOMAIN as BINARY_SENSOR_DOMAI
 from homeassistant.components.button import DOMAIN as BUTTON_DOMAIN
 from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import entity_sources
@@ -43,6 +45,113 @@ _INVERTER_BUTTON_UNIQUE_ID_PREFIXES = (
     "turn_on_inverter_",
     "reboot_inverter_",
 )
+
+
+def migrate_meter_entity_registry_entries(
+    hass: HomeAssistant, config_entry: ConfigEntry
+) -> None:
+    """Preserve meter entity IDs when migrating to DTU-independent identities.
+
+    Run on every setup, before entities load, including installations which
+    already have replacements under another DTU. Never rename entity IDs: that
+    would also trigger recorder renames. Removing a duplicate registry entry
+    does not merge its recorder data; log that mapping for separate recovery.
+    """
+    serials = {
+        str(meter["meter_serial_number"]).lower()
+        for meter in config_entry.data.get(CONF_METERS, [])
+    }
+    if not serials:
+        return
+
+    for other in hass.config_entries.async_entries(DOMAIN):
+        if other.entry_id == config_entry.entry_id:
+            continue
+        other_serials = {
+            str(meter["meter_serial_number"]).lower()
+            for meter in other.data.get(CONF_METERS, [])
+        }
+        if serials & other_serials:
+            raise ConfigEntryNotReady(
+                "Meter configured under multiple DTUs; reconfigure to keep one "
+                "meter owner before loading its entities"
+            )
+
+    registry = er.async_get(hass)
+    fields = {
+        description.key.split("].", 1)[1]
+        for description in HOYMILES_SENSORS
+        if description.key.startswith("meter_data[")
+    }
+    groups: dict[str, list[er.RegistryEntry]] = {}
+    for entity in list(registry.entities.values()):
+        if entity.platform != DOMAIN or entity.domain != SENSOR_DOMAIN:
+            continue
+        for serial in serials:
+            stable_prefix = f"hoymiles_meter_{serial}_meter_data."
+            entry_prefix = f"hoymiles_{entity.config_entry_id}_"
+            if entity.unique_id.startswith(stable_prefix):
+                field = entity.unique_id[len(stable_prefix) :]
+            elif entity.unique_id.startswith(entry_prefix):
+                tail = entity.unique_id[len(entry_prefix) :]
+                serial_prefix = f"{serial}_meter_data."
+                if tail.lower().startswith(serial_prefix):
+                    field = tail[len(serial_prefix) :]
+                elif re.fullmatch(r"meter_data\[\d+\]\.[A-Za-z_]+", tail):
+                    # Index-based IDs need serial evidence, not today's DTU
+                    # meter index (which may have changed since creation).
+                    if _infer_serial_from_entity(hass, entity, serials) != serial:
+                        continue
+                    field = tail.split("].", 1)[1]
+                else:
+                    continue
+            else:
+                continue
+            if field in fields:
+                groups.setdefault(stable_prefix + field, []).append(entity)
+            break
+
+    loaded = entity_sources(hass)
+    plans = []
+    for unique_id, candidates in groups.items():
+        # Registry creation time, not lexicographic names, identifies the
+        # original even when users gave it a custom name.
+        preserved = min(
+            candidates, key=lambda entity: (entity.created_at, entity.entity_id)
+        )
+        if (
+            len(candidates) == 1
+            and preserved.unique_id == unique_id
+            and preserved.config_entry_id == config_entry.entry_id
+        ):
+            continue
+        if any(entity.entity_id in loaded for entity in candidates):
+            # Preflight all groups before mutating any registry rows. A restart
+            # unloads the old owner safely; do not steal its live entities.
+            raise ConfigEntryNotReady(
+                "Restart Home Assistant to migrate meter entities still loaded "
+                "under a previous DTU"
+            )
+        plans.append((unique_id, preserved, candidates))
+
+    for unique_id, preserved, candidates in plans:
+        for duplicate in candidates:
+            if duplicate.entity_id == preserved.entity_id:
+                continue
+            _LOGGER.warning(
+                "Repairing duplicate meter entity %s -> %s. Recorder history "
+                "and statistics under %s remain separate and need a history "
+                "merge; they are not deleted by this registry repair",
+                duplicate.entity_id,
+                preserved.entity_id,
+                duplicate.entity_id,
+            )
+            registry.async_remove(duplicate.entity_id)
+        registry.async_update_entity(
+            preserved.entity_id,
+            new_unique_id=unique_id,
+            config_entry_id=config_entry.entry_id,
+        )
 
 
 def _old_unique_id(entry_id: str, key: str) -> str:
@@ -451,7 +560,6 @@ def _entity_registry_mappings(
     three_phase_inverters = data.get(CONF_THREE_PHASE_INVERTERS, [])
     inverters = single_phase_inverters + three_phase_inverters
     ports = data.get(CONF_PORTS, [])
-    meters = data.get(CONF_METERS, [])
     hybrid_inverters = data.get(CONF_HYBRID_INVERTERS, [])
 
     for description in HOYMILES_SENSORS:
@@ -481,13 +589,9 @@ def _entity_registry_mappings(
                 )
                 _add_mapping(mappings, targets, entry_id, SENSOR_DOMAIN, updated)
         elif "<meter_count>" in description.key:
-            for index, meter in enumerate(meters):
-                updated = dataclasses.replace(
-                    description,
-                    key=description.key.replace("<meter_count>", str(index)),
-                    serial_number=meter["meter_serial_number"],
-                )
-                _add_mapping(mappings, targets, entry_id, SENSOR_DOMAIN, updated)
+            # Meter migration runs at setup across all DTUs and preserves
+            # existing entity IDs, including user-chosen names.
+            continue
         elif dtu_serial_number:
             updated = dataclasses.replace(description, serial_number=dtu_serial_number)
             _add_mapping(mappings, targets, entry_id, SENSOR_DOMAIN, updated)

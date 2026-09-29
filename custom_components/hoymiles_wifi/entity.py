@@ -135,6 +135,11 @@ def get_hoymiles_entity_unique_id(entry_id: str, description: EntityDescription)
         return f"hoymiles_{entry_id}_{key}"
 
     stable_key = re.sub(r"\[[^\]]+\]", "", key).lstrip(".")
+    # A shared physical meter can be reported/owned by a different DTU after
+    # reconfiguration. Its registry identity must not depend on that owner.
+    if key.startswith("meter_data["):
+        return f"hoymiles_meter_{str(serial_number).lower()}_{stable_key}"
+
     unique_id_parts = [
         "hoymiles",
         entry_id,
