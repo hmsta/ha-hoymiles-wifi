@@ -1614,8 +1614,9 @@ class HoymilesDataSensorEntity(HoymilesCoordinatorEntity, RestoreSensor):
         self._native_value = None
         self._assumed_state = False
         self._last_known_value = None
-        self._last_successful_update = None
         self._last_update_state = None
+        self._zero_confirmation_pending = False
+        self._zero_value_retained = False
 
         self.update_state_value()
 
@@ -1630,29 +1631,17 @@ class HoymilesDataSensorEntity(HoymilesCoordinatorEntity, RestoreSensor):
         """Return the native value of the sensor."""
         if self._native_value == 0.0 and not self.entity_description.zero_is_valid:
             if self.entity_description.assume_state:
-                return self._last_known_value
-            elif (
-                self._last_successful_update is not None
-                and datetime.now() - self._last_successful_update
-                <= timedelta(minutes=3)
-            ):
-                _LOGGER.debug(
-                    "[%s] Returning last known value: %s, instead of 0.0 to cope with inverter in offline mode.",
-                    self.name,
-                    self._last_known_value,
-                )
                 self._assumed_state = True
                 return self._last_known_value
         else:
-            self._last_successful_update = datetime.now()
             self._last_known_value = self._native_value
-        self._assumed_state = False
+        self._assumed_state = self._zero_value_retained
         return self._native_value
 
     @property
     def assumed_state(self):
         """Return the assumed state of the sensor."""
-        return self._assumed_state
+        return self._assumed_state or self._zero_value_retained
 
     @property
     def extra_state_attributes(self):
@@ -1732,6 +1721,56 @@ class HoymilesDataSensorEntity(HoymilesCoordinatorEntity, RestoreSensor):
 
         return False
 
+    def _parent_inverter_reports_offline(self) -> bool:
+        """Return if the parent inverter explicitly reports a broken RF link."""
+        for attribute_name in ("sgs_data", "tgs_data"):
+            inverter_item = self._serial_matched_list_item(
+                attribute_name,
+                getattr(self.coordinator.data, attribute_name, []),
+            )
+            if inverter_item is None or inverter_item is _MISSING:
+                continue
+            if (
+                getattr(inverter_item, "link_status", None) == 0
+                and not self._inverter_live_data_available(inverter_item)
+            ):
+                return True
+
+        return False
+
+    def _confirm_zero_across_successful_polls(self, new_native_value):
+        """Suppress one unconfirmed zero without hiding an explicit offline state."""
+        self._zero_value_retained = False
+        if (
+            new_native_value != 0
+            or self.entity_description.zero_is_valid
+            or self.entity_description.assume_state
+        ):
+            if new_native_value != 0:
+                self._zero_confirmation_pending = False
+            return new_native_value
+
+        if self._parent_inverter_reports_offline():
+            self._zero_confirmation_pending = False
+            return new_native_value
+
+        previous_value = self._native_value
+        if previous_value in (None, 0, 0.0):
+            self._zero_confirmation_pending = False
+            return new_native_value
+
+        if getattr(self.coordinator, "real_data_poll_successful", None) is False:
+            self._zero_value_retained = True
+            return previous_value
+
+        if self._zero_confirmation_pending:
+            self._zero_confirmation_pending = False
+            return new_native_value
+
+        self._zero_confirmation_pending = True
+        self._zero_value_retained = True
+        return previous_value
+
     def update_state_value(self):
         """Update the state value of the sensor based on the coordinator data."""
         new_native_value = 0.0
@@ -1808,6 +1847,10 @@ class HoymilesDataSensorEntity(HoymilesCoordinatorEntity, RestoreSensor):
 
         if new_native_value is not None and self._conversion_factor is not None:
             new_native_value *= self._conversion_factor
+
+        new_native_value = self._confirm_zero_across_successful_polls(
+            new_native_value
+        )
 
         if (
             new_native_value is not None

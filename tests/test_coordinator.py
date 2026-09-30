@@ -767,6 +767,105 @@ def test_pv_sensor_reads_real_data_by_serial_and_port_not_stored_index() -> None
     assert entity.native_value == 1681
 
 
+def _pv_power_entity_for_zero_confirmation():
+    """Build a live PV power entity for zero-confirmation tests."""
+    serial_number = 22134652556250
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            pv_data=[
+                SimpleNamespace(
+                    serial_number=serial_number,
+                    port_number=1,
+                    power=1000,
+                )
+            ],
+            sgs_data=[
+                SimpleNamespace(
+                    serial_number=serial_number,
+                    link_status=1,
+                    modulation_index_signal=-80,
+                )
+            ],
+            tgs_data=[],
+        ),
+        startup_refresh_pending=False,
+        real_data_poll_successful=True,
+    )
+    entity = HoymilesDataSensorEntity(
+        SimpleNamespace(
+            entry_id="entry-a",
+            data={CONF_DTU_SERIAL_NUMBER: "4121a01953c8"},
+        ),
+        HoymilesSensorEntityDescription(
+            key="pv_data[0].power",
+            serial_number="1421a01a53da",
+            port_number=1,
+            conversion_factor=0.1,
+        ),
+        coordinator,
+    )
+    return coordinator, entity
+
+
+def test_pv_power_requires_two_successful_zero_polls() -> None:
+    """Test one successful zero sample does not create a production dip."""
+    coordinator, entity = _pv_power_entity_for_zero_confirmation()
+    assert entity.native_value == 100.0
+
+    coordinator.data.pv_data[0].power = 0
+    entity.update_state_value()
+
+    assert entity.native_value == 100.0
+    assert entity.assumed_state is True
+
+    entity.update_state_value()
+
+    assert entity.native_value == 0.0
+    assert entity.assumed_state is False
+
+
+def test_partial_poll_zero_does_not_count_as_confirmation() -> None:
+    """Test a transport failure cannot start or complete zero confirmation."""
+    coordinator, entity = _pv_power_entity_for_zero_confirmation()
+    coordinator.data.pv_data[0].power = 0
+    coordinator.real_data_poll_successful = False
+
+    entity.update_state_value()
+
+    assert entity.native_value == 100.0
+    assert entity._zero_confirmation_pending is False
+
+    coordinator.real_data_poll_successful = True
+    entity.update_state_value()
+
+    assert entity.native_value == 100.0
+    assert entity._zero_confirmation_pending is True
+
+    coordinator.real_data_poll_successful = False
+    entity.update_state_value()
+
+    assert entity.native_value == 100.0
+    assert entity._zero_confirmation_pending is True
+
+    coordinator.real_data_poll_successful = True
+    entity.update_state_value()
+
+    assert entity.native_value == 0.0
+
+
+def test_explicit_offline_zero_is_published_immediately() -> None:
+    """Test an inverter RF-offline state bypasses zero confirmation."""
+    coordinator, entity = _pv_power_entity_for_zero_confirmation()
+    coordinator.data.pv_data[0].power = 0
+    coordinator.data.sgs_data[0].link_status = 0
+    coordinator.data.sgs_data[0].modulation_index_signal = 0
+
+    entity.update_state_value()
+
+    assert entity.native_value == 0.0
+    assert entity.assumed_state is False
+
+
 def test_pv_sensor_without_matching_serial_and_port_is_unknown() -> None:
     """Test a missing PV serial/port does not fall back to another inverter."""
     config_entry = SimpleNamespace(
