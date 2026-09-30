@@ -7,6 +7,8 @@ import logging
 import re
 from typing import Any
 
+import attr
+
 from homeassistant.components.binary_sensor import DOMAIN as BINARY_SENSOR_DOMAIN
 from homeassistant.components.button import DOMAIN as BUTTON_DOMAIN
 from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN
@@ -222,22 +224,52 @@ def _repair_inverter_device_registry_entries(
             is not None
             and config_entry.domain == DOMAIN
         ]
-        update_kwargs: dict[str, Any] = {}
+        config_entry_subentries = getattr(
+            device_entry, "config_entries_subentries", None
+        )
+        if (
+            target_entry_id in device_entry.config_entries
+            and config_entry_subentries is not None
+            and target_entry_id not in config_entry_subentries
+        ):
+            # Repair records produced by the old combined add/remove update.
+            # They contain the owner in config_entries but not in the matching
+            # subentry map, which makes both entity registration and the public
+            # registry update API fail with KeyError. Replace only this damaged
+            # registry value, preserving its device ID and all other metadata.
+            repaired_subentries = dict(config_entry_subentries)
+            repaired_subentries[target_entry_id] = {None}
+            device_entry = attr.evolve(
+                device_entry,
+                config_entries_subentries=repaired_subentries,
+            )
+            device_registry.devices[device_entry.id] = device_entry
+            device_registry.async_schedule_save()
+            repaired = True
+
         if target_entry_id not in device_entry.config_entries:
-            update_kwargs["add_config_entry_id"] = target_entry_id
+            # Home Assistant's legacy multi-config-entry device-registry API
+            # derives both config_entries and config_entries_subentries from the
+            # original object for a single update. Combining add and remove in
+            # one call can therefore discard the newly added subentry mapping,
+            # leaving a device that lists the target owner but raises KeyError
+            # when its first entity is registered. Add the new owner first and
+            # remove stale owners only in subsequent calls.
+            device_registry.async_update_device(
+                device_entry.id,
+                add_config_entry_id=target_entry_id,
+            )
+            repaired = True
+            device_entry = device_registry.async_get(device_entry.id)
+
         if (
             target_dtu_device is not None
             and device_entry.via_device_id != target_dtu_device.id
         ):
-            update_kwargs["via_device_id"] = target_dtu_device.id
-
-        if not stale_entry_ids and not update_kwargs:
-            continue
-
-        if update_kwargs:
-            if stale_entry_ids:
-                update_kwargs["remove_config_entry_id"] = stale_entry_ids.pop(0)
-            device_registry.async_update_device(device_entry.id, **update_kwargs)
+            device_registry.async_update_device(
+                device_entry.id,
+                via_device_id=target_dtu_device.id,
+            )
             repaired = True
 
         for stale_entry_id in stale_entry_ids:

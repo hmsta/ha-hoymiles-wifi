@@ -1,11 +1,13 @@
 """Test component setup."""
 
-from homeassistant.setup import async_setup_component
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntry
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.hoymiles_wifi import (
     _async_register_lovelace_resource,
+    _ensure_dtu_device_registry_entry,
     _frontend_card_resource_url,
     _lovelace_resources_from_data,
     _resource_base_url,
@@ -72,6 +74,23 @@ async def test_async_setup(hass):
     """Test the component gets setup."""
 
     assert await async_setup_component(hass, DOMAIN, {}) is True
+
+
+async def test_ensure_dtu_device_registry_entry_creates_parent(hass):
+    """Test the DTU parent exists before inverter platforms are forwarded."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_DTU_SERIAL_NUMBER: "4121A01954D1"},
+    )
+    entry.add_to_hass(hass)
+
+    _ensure_dtu_device_registry_entry(hass, entry)
+
+    device = dr.async_get(hass).async_get_device(
+        identifiers={(DOMAIN, "4121A01954D1")}
+    )
+    assert device is not None
+    assert device.config_entries == {entry.entry_id}
 
 
 async def test_register_lovelace_resource_creates_cache_busted_module(

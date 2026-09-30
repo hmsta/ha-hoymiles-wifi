@@ -11,9 +11,12 @@ from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_ID, CONF_TYPE, CONF_URL, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import (
+    config_validation as cv,
+    device_registry as dr,
+    entity_registry as er,
+)
 from homeassistant.helpers.device_registry import DeviceEntry
-from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.service import SupportsResponse
 from homeassistant.helpers.typing import ConfigType
 from hoymiles_wifi.dtu import DTU
@@ -448,10 +451,25 @@ def _remove_metadata_entities_by_unique_id(
             entity_registry.async_remove(entity_id)
 
 
+def _ensure_dtu_device_registry_entry(
+    hass: HomeAssistant, config_entry: ConfigEntry
+) -> None:
+    """Create the DTU parent before inverter devices reference it."""
+    dtu_serial_number = config_entry.data.get(CONF_DTU_SERIAL_NUMBER)
+    if not dtu_serial_number:
+        return
+
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=config_entry.entry_id,
+        identifiers={(DOMAIN, dtu_serial_number)},
+    )
+
+
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     """Set up this integration using UI."""
 
     await _async_register_frontend(hass)
+    _ensure_dtu_device_registry_entry(hass, config_entry)
     migrate_meter_entity_registry_entries(hass, config_entry)
     transfer_inverter_entity_registry_entries(
         hass,

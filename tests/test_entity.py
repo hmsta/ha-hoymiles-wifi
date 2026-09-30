@@ -12,6 +12,7 @@ from custom_components.hoymiles_wifi.entity import (
     _get_inverter_model_name,
 )
 from custom_components.hoymiles_wifi.entity_migration import (
+    _repair_inverter_device_registry_entries,
     transfer_inverter_entity_registry_entries,
 )
 from homeassistant.core import HomeAssistant
@@ -268,6 +269,84 @@ async def test_transfer_repairs_stale_inverter_device_config_entry(
     }
     assert device_registry.async_get(device.id).via_device_id == target_dtu_device.id
     assert device_registry.async_get(device.id).via_device_id != old_dtu_device.id
+
+
+async def test_transfer_adds_owner_before_removing_stale_owner(
+    hass: HomeAssistant,
+) -> None:
+    """Test moving a device keeps the new owner's subentry association intact."""
+    serial_number = "1421a01a5294"
+    old_entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="old-entry",
+        data={CONF_DTU_SERIAL_NUMBER: "4121A01953C8"},
+    )
+    target_entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="new-entry",
+        data={CONF_DTU_SERIAL_NUMBER: "4121A01954D1"},
+    )
+    old_entry.add_to_hass(hass)
+    target_entry.add_to_hass(hass)
+    device_registry = dr.async_get(hass)
+    device_registry.async_get_or_create(
+        config_entry_id=target_entry.entry_id,
+        identifiers={(DOMAIN, target_entry.data[CONF_DTU_SERIAL_NUMBER])},
+    )
+    device = device_registry.async_get_or_create(
+        config_entry_id=old_entry.entry_id,
+        identifiers={(DOMAIN, serial_number)},
+        via_device=(DOMAIN, old_entry.data[CONF_DTU_SERIAL_NUMBER]),
+    )
+
+    repaired = transfer_inverter_entity_registry_entries(
+        hass, target_entry.entry_id, {serial_number}
+    )
+
+    assert repaired is True
+    repaired_device = device_registry.async_get(device.id)
+    assert repaired_device.config_entries == {target_entry.entry_id}
+    assert repaired_device.config_entries_subentries == {
+        target_entry.entry_id: {None}
+    }
+
+
+def test_transfer_repairs_missing_config_entry_subentry_mapping() -> None:
+    """Test startup repairs the malformed ownership written by the old code."""
+    serial_number = "1421a01a5294"
+    target_entry = SimpleNamespace(
+        entry_id="new-entry",
+        domain=DOMAIN,
+        data={CONF_DTU_SERIAL_NUMBER: "4121A01954D1"},
+    )
+    target_dtu_device = SimpleNamespace(id="target-dtu-device")
+    malformed_device = dr.DeviceEntry(
+        id="inverter-device",
+        config_entries={target_entry.entry_id},
+        config_entries_subentries={},
+        via_device_id=target_dtu_device.id,
+        identifiers={(DOMAIN, serial_number)},
+    )
+    registry = MagicMock()
+    registry.devices = {}
+    registry.async_get_device.side_effect = [target_dtu_device, malformed_device]
+    hass = MagicMock()
+    hass.config_entries.async_get_entry.return_value = target_entry
+
+    with patch(
+        "custom_components.hoymiles_wifi.entity_migration.dr.async_get",
+        return_value=registry,
+    ):
+        repaired = _repair_inverter_device_registry_entries(
+            hass, target_entry.entry_id, {serial_number}
+        )
+
+    assert repaired is True
+    assert registry.devices[malformed_device.id].config_entries_subentries == {
+        target_entry.entry_id: {None}
+    }
+    registry.async_schedule_save.assert_called_once_with()
+    registry.async_update_device.assert_not_called()
 
 
 async def test_transfer_repairs_stale_inverter_via_device(
