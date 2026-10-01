@@ -78,7 +78,6 @@ INVERTER_LIVE_FIELDS = (
     "current_phase_B",
     "current_phase_C",
     "frequency",
-    "modulation_index_signal",
     "power_factor",
     "reactive_power",
     "temperature",
@@ -1700,7 +1699,12 @@ class HoymilesDataSensorEntity(HoymilesCoordinatorEntity, RestoreSensor):
         return value not in (None, 0, "", False)
 
     def _inverter_live_data_available(self, inverter_item) -> bool:
-        """Return if an inverter row contains live telemetry."""
+        """Return if a row contains electrical or temperature telemetry.
+
+        RSSI and link status describe communication, not measurement validity.
+        A DTU can retain RSSI while returning default-valued measurements for
+        an unreachable inverter. Those defaults must not become measured zeros.
+        """
         if inverter_item is None or inverter_item is _MISSING:
             return False
 
@@ -1778,11 +1782,7 @@ class HoymilesDataSensorEntity(HoymilesCoordinatorEntity, RestoreSensor):
         if self.coordinator is not None and (
             not hasattr(self.coordinator, "data") or self.coordinator.data is None
         ):
-            new_native_value = (
-                None
-                if getattr(self.coordinator, "startup_refresh_pending", False)
-                else 0.0
-            )
+            new_native_value = None
         elif "[" in self._attribute_name and "]" in self._attribute_name:
             # Extracting the list index and attribute dynamically
             attribute_name, index = self._attribute_name.split("[")
@@ -1815,8 +1815,20 @@ class HoymilesDataSensorEntity(HoymilesCoordinatorEntity, RestoreSensor):
                     elif (
                         attribute_name == "pv_data"
                         and nested_attribute in PV_LIVE_FIELDS
-                        and not self._parent_inverter_live_data_available()
+                        and (
+                            not self._parent_inverter_live_data_available()
+                            or not any(
+                                self._has_non_default_value(
+                                    serial_matched_item, field_name
+                                )
+                                for field_name in PV_LIVE_FIELDS
+                            )
+                        )
                     ):
+                        # RSSI can survive a failed inverter telemetry read.
+                        # An entirely empty PV sample is unknown, even when
+                        # every DTU page was successfully received. Repeating
+                        # it must not confirm a synthetic zero-power reading.
                         new_native_value = None
                 else:
                     new_native_value = serial_matched_item
@@ -1925,6 +1937,8 @@ class HoymilesEnergySensorEntity(HoymilesDataSensorEntity, RestoreSensor):
         self._last_successful_update = datetime.now()
         self._last_update_state = datetime.now()
         self._assumed_state = False
+        self._zero_confirmation_pending = False
+        self._zero_value_retained = False
         if getattr(self, "hass", None) is not None:
             self.async_write_ha_state()
 

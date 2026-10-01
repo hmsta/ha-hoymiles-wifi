@@ -173,11 +173,6 @@ def _merge_partial_real_data(previous, partial):
 
     merged = RealDataNew_pb2.RealDataNewReqDTO()
     merged.CopyFrom(partial)
-    fresh_inverter_serials = {
-        record.serial_number
-        for field_name in ("rsd_data", "sgs_data", "tgs_data")
-        for record in getattr(partial, field_name)
-    }
 
     for field_name, key_fields in _REAL_DATA_RECORD_KEYS.items():
         merged_records = getattr(merged, field_name)
@@ -191,14 +186,9 @@ def _merge_partial_real_data(previous, partial):
             )
             if record_key in fresh_keys:
                 continue
-            if (
-                field_name == "pv_data"
-                and previous_record.serial_number in fresh_inverter_serials
-            ):
-                # A fresh inverter-level row is authoritative. In particular,
-                # do not resurrect old per-port production after that row says
-                # the inverter is offline and therefore omits its PV rows.
-                continue
+            # Inverter and PV rows may arrive on different pages. A received
+            # inverter row cannot establish why a PV row is missing from an
+            # incomplete snapshot. Sensors still check parent live telemetry.
             merged_records.add().CopyFrom(previous_record)
             fresh_keys.add(record_key)
 
