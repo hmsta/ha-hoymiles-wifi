@@ -366,6 +366,8 @@ The same `filters` object works on all table cards. Inverter cards accept `searc
 
 For DTU tables, `power_limit` resolves to the Home Assistant number entity `number.dtu_<serial>_power_limit`; other common DTU columns such as `ip`, `rssi`, `ac_power`, and `daily_energy` resolve to their matching sensor or binary-sensor entities.
 
+Add `zero_export_enable` to a DTU card's `columns` list to show export-management status (`on` = enabled, `off` = disabled). It resolves to `binary_sensor.dtu_<serial>_zero_export_enable` and uses the existing five-minute config polling. Missing or unrecognized flag values are reported as unknown.
+
 ## Screenshots
 
 ![Hoymiles layout map](screenshots/layout-map.png)

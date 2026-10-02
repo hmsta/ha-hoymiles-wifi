@@ -70,6 +70,7 @@
     ip: "IP",
     ip_address: "IP",
     power_limit: "Power limit",
+    zero_export_enable: "Export management",
     signal_strength: "RSSI",
     grid_voltage: "Grid voltage",
   };
@@ -888,6 +889,7 @@
       if (row.kind === "inverter") return inverterEntity(row.serial, suffix);
       if (row.kind === "panels") return portEntity(row.serial, row.port, suffix);
       if (row.kind === "dtu" && suffix === "power_limit") return dtuNumber(row.serial, suffix);
+      if (row.kind === "dtu" && suffix === "zero_export_enable") return `binary_sensor.dtu_${row.serial}_${suffix}`;
       if (row.kind === "dtu") return dtuSensor(row.serial, suffix);
       return "";
     }

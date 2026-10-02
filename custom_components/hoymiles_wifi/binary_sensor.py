@@ -18,6 +18,7 @@ from hoymiles_wifi.dtu import NetworkState
 from .const import (
     CONF_DTU_SERIAL_NUMBER,
     DOMAIN,
+    HASS_CONFIG_COORDINATOR,
     HASS_DATA_COORDINATOR,
     HASS_ENERGY_STORAGE_DATA_COORDINATOR,
 )
@@ -69,7 +70,37 @@ async def async_setup_entry(
             HoymilesInverterSensorEntity(config_entry, updated_description, coordinator)
         )
 
+    config_coordinator = hass_data.get(HASS_CONFIG_COORDINATOR)
+    if config_coordinator is not None:
+        sensors.append(
+            HoymilesExportManagementSensorEntity(
+                config_entry,
+                HoymilesBinarySensorEntityDescription(
+                    key="zero_export_enable",
+                    translation_key="zero_export_enable",
+                    entity_category=EntityCategory.DIAGNOSTIC,
+                    is_dtu_sensor=True,
+                    serial_number=dtu_serial_number,
+                ),
+                config_coordinator,
+            )
+        )
+
     async_add_entities(sensors)
+
+
+class HoymilesExportManagementSensorEntity(HoymilesCoordinatorEntity, BinarySensorEntity):
+    """Report the export-management flag from the DTU configuration."""
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return unknown when the flag is missing or unrecognized."""
+        value = getattr(self.coordinator.data, "zero_export_enable", None)
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+        return None
 
 
 class HoymilesInverterSensorEntity(HoymilesCoordinatorEntity, BinarySensorEntity):

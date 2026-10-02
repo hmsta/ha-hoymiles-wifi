@@ -45,6 +45,9 @@
   },
   "entity": {
     "binary_sensor": {
+      "zero_export_enable": {
+        "name": "Gestion de l’injection activée"
+      },
       "dtu": {
         "name": "DTU"
       }
