@@ -70,7 +70,7 @@
     ip: "IP",
     ip_address: "IP",
     power_limit: "Power limit",
-    zero_export_enable: "Export management",
+    zero_export_enable: "Zero export",
     signal_strength: "RSSI",
     grid_voltage: "Grid voltage",
   };

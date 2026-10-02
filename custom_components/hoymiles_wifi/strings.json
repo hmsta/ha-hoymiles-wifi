@@ -46,7 +46,7 @@
   "entity": {
     "binary_sensor": {
       "zero_export_enable": {
-        "name": "Export management enabled"
+        "name": "Zero export enabled"
       },
       "dtu": {
         "name": "DTU"

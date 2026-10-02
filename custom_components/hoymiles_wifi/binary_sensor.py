@@ -12,6 +12,7 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from hoymiles_wifi.dtu import NetworkState
 
@@ -72,25 +73,47 @@ async def async_setup_entry(
 
     config_coordinator = hass_data.get(HASS_CONFIG_COORDINATOR)
     if config_coordinator is not None:
-        sensors.append(
-            HoymilesExportManagementSensorEntity(
-                config_entry,
-                HoymilesBinarySensorEntityDescription(
-                    key="zero_export_enable",
-                    translation_key="zero_export_enable",
-                    entity_category=EntityCategory.DIAGNOSTIC,
-                    is_dtu_sensor=True,
-                    serial_number=dtu_serial_number,
-                ),
-                config_coordinator,
-            )
+        export_sensor = HoymilesExportManagementSensorEntity(
+            config_entry,
+            HoymilesBinarySensorEntityDescription(
+                key="zero_export_enable",
+                translation_key="zero_export_enable",
+                entity_category=EntityCategory.DIAGNOSTIC,
+                is_dtu_sensor=True,
+                serial_number=dtu_serial_number,
+            ),
+            config_coordinator,
         )
+        _repair_export_management_entity_id(hass, export_sensor)
+        sensors.append(export_sensor)
 
     async_add_entities(sensors)
 
 
+@callback
+def _repair_export_management_entity_id(hass, sensor) -> None:
+    """Repair previously generated names while preserving registry identity."""
+    registry = er.async_get(hass)
+    existing_id = registry.async_get_entity_id("binary_sensor", DOMAIN, sensor.unique_id)
+    if not existing_id or existing_id == sensor.entity_id:
+        return
+    if registry.async_get(sensor.entity_id) is not None:
+        _LOGGER.warning(
+            "Cannot rename zero-export entity %s to %s: ID already occupied",
+            existing_id,
+            sensor.entity_id,
+        )
+        return
+    registry.async_update_entity(existing_id, new_entity_id=sensor.entity_id)
+
+
 class HoymilesExportManagementSensorEntity(HoymilesCoordinatorEntity, BinarySensorEntity):
-    """Report the export-management flag from the DTU configuration."""
+    """Report the zero-export flag from the DTU configuration."""
+
+    def __init__(self, config_entry, description, coordinator):
+        """Use a fixed serial-based ID regardless of the HA device name."""
+        super().__init__(config_entry, description, coordinator)
+        self.entity_id = f"binary_sensor.{self._attr_suggested_object_id}"
 
     @property
     def is_on(self) -> bool | None:

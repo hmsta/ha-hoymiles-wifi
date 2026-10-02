@@ -46,7 +46,7 @@
   "entity": {
     "binary_sensor": {
       "zero_export_enable": {
-        "name": "Einspeisemanagement aktiviert"
+        "name": "Nulleinspeisung aktiviert"
       },
       "dtu": {
         "name": "DTU"
