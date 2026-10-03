@@ -7,6 +7,10 @@ import logging
 from enum import Enum
 import re
 
+from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.components.button import ButtonEntity
+from homeassistant.components.number import NumberEntity
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity, EntityDescription
@@ -77,6 +81,17 @@ class HoymilesEntity(Entity):
             config_entry.entry_id, description
         )
         self._attr_suggested_object_id = get_hoymiles_entity_object_id(description)
+        # Suggested object IDs can still receive HA device-name prefixes.
+        # Set the actual entity_id for every platform before registration.
+        for entity_type, domain in (
+            (SensorEntity, "sensor"),
+            (BinarySensorEntity, "binary_sensor"),
+            (ButtonEntity, "button"),
+            (NumberEntity, "number"),
+        ):
+            if isinstance(self, entity_type):
+                self.entity_id = f"{domain}.{self._attr_suggested_object_id}"
+                break
 
         if description.port_number:
             self._attr_translation_placeholders = {

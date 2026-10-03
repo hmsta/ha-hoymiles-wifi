@@ -110,11 +110,6 @@ def _repair_export_management_entity_id(hass, sensor) -> None:
 class HoymilesExportManagementSensorEntity(HoymilesCoordinatorEntity, BinarySensorEntity):
     """Report the zero-export flag from the DTU configuration."""
 
-    def __init__(self, config_entry, description, coordinator):
-        """Use a fixed serial-based ID regardless of the HA device name."""
-        super().__init__(config_entry, description, coordinator)
-        self.entity_id = f"binary_sensor.{self._attr_suggested_object_id}"
-
     @property
     def is_on(self) -> bool | None:
         """Return unknown when the flag is missing or unrecognized."""

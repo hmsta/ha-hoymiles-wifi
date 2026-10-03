@@ -5,6 +5,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from homeassistant.helpers.entity import Entity
+
+from custom_components.hoymiles_wifi import binary_sensor, button, number, sensor
 from custom_components.hoymiles_wifi.const import CONF_DTU_SERIAL_NUMBER, DOMAIN
 from custom_components.hoymiles_wifi.entity import (
     HoymilesEntity,
@@ -21,6 +24,34 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
 DTU_SERIAL_NUMBER = "4121a01953c8"
+
+
+@pytest.mark.parametrize(
+    ("entity_class", "domain"),
+    [
+        (entity_class, domain)
+        for module, domain in (
+            (sensor, "sensor"),
+            (binary_sensor, "binary_sensor"),
+            (button, "button"),
+            (number, "number"),
+        )
+        for entity_class in vars(module).values()
+        if isinstance(entity_class, type)
+        and entity_class.__module__ == module.__name__
+        and issubclass(entity_class, Entity)
+    ],
+)
+def test_all_entity_classes_receive_explicit_ids(entity_class, domain) -> None:
+    """Every concrete entity must get a real ID from the shared initializer."""
+    entity = entity_class.__new__(entity_class)
+    description = HoymilesEntityDescription(
+        key="sgs_data[0].inverter_temperature",
+        translation_key="inverter_temperature",
+        serial_number="1421A01A4525",
+    )
+    HoymilesEntity.__init__(entity, _config_entry(), description)
+    assert entity.entity_id == f"{domain}.inverter_1421a01a4525_temperature"
 
 
 def _config_entry():

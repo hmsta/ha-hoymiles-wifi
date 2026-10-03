@@ -8,7 +8,6 @@ import logging
 import re
 
 from homeassistant.components.sensor import (
-    DOMAIN as SENSOR_DOMAIN,
     RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
@@ -1986,7 +1985,6 @@ class HoymilesStaticMetadataSensorEntity(HoymilesEntity, SensorEntity):
     ):
         """Initialize a static metadata sensor."""
         super().__init__(config_entry, description)
-        self._attr_entity_id = f"{SENSOR_DOMAIN}.{self._attr_suggested_object_id}"
         self._attr_native_value = native_value
 
 
