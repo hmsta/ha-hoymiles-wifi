@@ -308,14 +308,17 @@
       color: rgba(255, 181, 71, .95);
     }
 
+    .signalMarker.temperature.rssiOk,
     .signalMarker.rssiOk .signalIcon {
       color: rgba(39, 194, 107, .96);
     }
 
+    .signalMarker.temperature.rssiWarn,
     .signalMarker.rssiWarn .signalIcon {
       color: rgba(255, 181, 71, .95);
     }
 
+    .signalMarker.temperature.rssiBad,
     .signalMarker.rssiBad .signalIcon {
       color: rgba(244, 82, 92, .97);
     }
@@ -1020,6 +1023,7 @@
             </div>
             <div class="modeToggle" aria-label="Panel metric mode">
               <button type="button" data-mode="signal">RSSI</button>
+              <button type="button" data-mode="temperature">°C</button>
               <button type="button" data-mode="power">W</button>
               <button type="button" data-mode="daily_energy">Wh</button>
             </div>
@@ -1424,6 +1428,7 @@
       ) {
         return "signal";
       }
+      if (["temperature", "temp", "°c", "c"].includes(value)) return "temperature";
       return "power";
     }
 
@@ -1444,6 +1449,7 @@
         power: new Map(),
         dailyEnergy: new Map(),
         signalStrength: new Map(),
+        temperature: new Map(),
       };
       if (Array.isArray(parsed)) {
         for (const entry of parsed) {
@@ -1455,8 +1461,10 @@
             ? result.dailyEnergy
             : metric === "signal"
               ? result.signalStrength
-              : result.power;
-          if (serial && metric === "signal") {
+              : metric === "temperature"
+                ? result.temperature
+                : result.power;
+          if (serial && (metric === "signal" || metric === "temperature")) {
             this._addSerialEntityKeys(target, serial, entry.entity);
           } else if (serial && port) {
             this._addEntityKeys(target, serial, port, entry.entity);
@@ -1475,7 +1483,9 @@
           || parsed.signalStrength
           || parsed.signal
           || parsed.rssi
+          || parsed.temperature
         ) {
+          result.temperature = this._normalizeEntityMap(parsed.temperature);
           result.power = this._normalizeEntityMap(parsed.power);
           result.dailyEnergy = this._normalizeEntityMap(parsed.daily_energy ?? parsed.dailyEnergy);
           result.signalStrength = this._normalizeEntityMap(
@@ -1830,12 +1840,14 @@
 
     _entityMapForMetric(metric) {
       if (metric === "daily_energy") return this._config.entities.dailyEnergy;
+      if (metric === "temperature") return this._config.entities.temperature;
       if (metric === "signal") return this._config.entities.signalStrength;
       return this._config.entities.power;
     }
 
     _indexMapForMetric(index, metric) {
       if (metric === "daily_energy") return index.dailyEnergy;
+      if (metric === "temperature") return index.temperature;
       if (metric === "signal") return index.signalStrength;
       return index.power;
     }
@@ -1849,13 +1861,13 @@
         : [`sensor.inverter_${serial}_port_${port}_dc_power`];
     }
 
-    _directSignalEntityIds(serial) {
+    _directSignalEntityIds(serial, metric = "signal") {
       const normalized = normalizeSerial(serial);
-      return normalized ? [`sensor.inverter_${normalized}_signal_strength`] : [];
+      return normalized ? [`sensor.inverter_${normalized}_${metric === "temperature" ? "temperature" : "signal_strength"}`] : [];
     }
 
-    _signalEntityForSerial(serial) {
-      const explicitMap = this._entityMapForMetric("signal");
+    _signalEntityForSerial(serial, metric = "signal") {
+      const explicitMap = this._entityMapForMetric(metric);
       const normalized = normalizeSerial(serial);
       const suffix = String(serial || "").slice(-4).toLowerCase();
       for (const key of [normalized, suffix]) {
@@ -1864,12 +1876,12 @@
       }
 
       const states = this._hass && this._hass.states ? this._hass.states : {};
-      for (const entityId of this._directSignalEntityIds(serial)) {
+      for (const entityId of this._directSignalEntityIds(serial, metric)) {
         if (states[entityId]) return entityId;
       }
 
       const index = this._buildEntityIndex();
-      const signalIndex = this._indexMapForMetric(index, "signal");
+      const signalIndex = this._indexMapForMetric(index, metric);
       for (const key of [normalized, suffix]) {
         const entityId = signalIndex.get(key);
         if (entityId) return entityId;
@@ -1905,6 +1917,7 @@
         power: new Map(),
         dailyEnergy: new Map(),
         signalStrength: new Map(),
+        temperature: new Map(),
       };
       const states = this._hass && this._hass.states ? this._hass.states : {};
       for (const [entityId, stateObj] of Object.entries(states)) {
@@ -1916,7 +1929,7 @@
         const serial = this._serialFromEntity(entityId, stateObj, attrs);
         if (!serial) continue;
 
-        if (metric === "signal") {
+        if (metric === "signal" || metric === "temperature") {
           this._addSerialEntityKeys(this._indexMapForMetric(index, metric), serial, entityId);
           continue;
         }
@@ -1941,6 +1954,10 @@
         || unit === "dbm"
       ) {
         return "signal";
+      }
+
+      if (attrs.device_class === "temperature" || name.includes("temperature")) {
+        return "temperature";
       }
 
       const isPort = attrs.port_number != null || name.includes("port");
@@ -2072,6 +2089,16 @@
           ? stateObj.attributes.unit_of_measurement
           : "dBm",
       };
+    }
+
+    _temperatureMetric(serial) {
+      const entityId = this._signalEntityForSerial(serial, "temperature");
+      const state = this._hass?.states?.[entityId];
+      let value = numericValue(state?.state);
+      const unit = state?.attributes?.unit_of_measurement;
+      if (value != null && unit === "°F") value = (value - 32) * 5 / 9;
+      if (value != null && unit === "K") value -= 273.15;
+      return { value, entityId, unit: "°C" };
     }
 
     _panelMetrics(panel) {
@@ -2329,13 +2356,16 @@
 
     _configureSignalMarker(marker, anchor) {
       const panel = anchor.panel;
-      const metric = this._signalMetric(anchor.serial);
+      const temperature = this._metricMode === "temperature";
+      const metric = temperature ? this._temperatureMetric(anchor.serial) : this._signalMetric(anchor.serial);
       const value = metric.value == null ? null : Number(metric.value);
-      const isOff = this._isMissingSignalValue(value);
-      const isWeak = !this._config.hasRssiThresholds && !isOff && value <= -80;
-      const isOk = this._config.hasRssiThresholds && !isOff && value >= this._config.rssiOkDbm;
-      const isBad = this._config.hasRssiThresholds && !isOff && value <= this._config.rssiBadDbm;
-      const isWarn = this._config.hasRssiThresholds && !isOff && !isOk && !isBad;
+      const isOff = temperature ? value == null || !Number.isFinite(value) : this._isMissingSignalValue(value);
+      const isWeak = !temperature && !this._config.hasRssiThresholds && !isOff && value <= -80;
+      const isOk = !isOff && (temperature ? value < 70 : this._config.hasRssiThresholds && value >= this._config.rssiOkDbm);
+      const isBad = !isOff && (temperature ? value >= 80 : this._config.hasRssiThresholds && value <= this._config.rssiBadDbm);
+      const isWarn = (temperature || this._config.hasRssiThresholds) && !isOff && !isOk && !isBad;
+      const display = temperature ? (isOff ? "-- °C" : this._formatMetric(metric)) : this._formatSignalMetric(metric);
+      marker.classList.toggle("temperature", temperature);
       marker.classList.toggle("off", isOff);
       marker.classList.toggle("weak", isWeak);
       marker.classList.toggle("rssiOk", isOk);
@@ -2345,12 +2375,12 @@
         panel.area,
         `SN ${String(panel.sn || "").toUpperCase()}`,
         `Anchor port ${panel.prt}`,
-        metric.entityId || "No signal entity",
-        this._formatSignalMetric(metric),
+        metric.entityId || (temperature ? "No temperature entity" : "No signal entity"),
+        display,
       ].filter(Boolean).join("\n");
 
       const text = marker.querySelector(".signalValue");
-      if (text) text.textContent = this._formatSignalMetric(metric);
+      if (text) text.textContent = display;
 
       if (metric.entityId) {
         marker.dataset.entityId = metric.entityId;
@@ -2380,7 +2410,7 @@
       marker.style.setProperty("--signal-font", `${font.toFixed(2)}px`);
       marker.style.setProperty("--signal-icon", `${(font * 0.94).toFixed(2)}px`);
 
-      marker.appendChild(this._createSignalIcon());
+      if (this._metricMode !== "temperature") marker.appendChild(this._createSignalIcon());
       const text = document.createElement("span");
       text.className = "signalValue";
       marker.appendChild(text);
@@ -2405,7 +2435,7 @@
       this._panelElements = new Map();
       this._signalElements = new Map();
 
-      if (this._metricMode === "signal") {
+      if (this._metricMode === "signal" || this._metricMode === "temperature") {
         this._renderSignalMarkers(this._overlay);
         return;
       }
@@ -2421,7 +2451,7 @@
     }
 
     _updatePanelValues() {
-      if (this._metricMode === "signal") {
+      if (this._metricMode === "signal" || this._metricMode === "temperature") {
         if (!this._signalElements || this._signalElements.size === 0) return false;
         for (const { item, anchor } of this._signalElements.values()) {
           this._configureSignalMarker(item, anchor);
