@@ -136,9 +136,6 @@
       "signal_strength": {
         "name": "Signal strength"
       },
-      "link_status": {
-        "name": "Link status"
-      },
       "location": {
         "name": "Location"
       },

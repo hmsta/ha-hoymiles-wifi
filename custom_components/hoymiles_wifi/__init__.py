@@ -62,6 +62,7 @@ from .coordinator import (
 from .entity_migration import (
     async_migrate_entity_unique_ids,
     migrate_meter_entity_registry_entries,
+    remove_obsolete_link_status_entities,
     transfer_inverter_entity_registry_entries,
 )
 from .layout_metadata import (
@@ -477,6 +478,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
         _exclusively_owned_inverter_serials(hass, config_entry),
     )
     _repair_metadata_entity_ids(hass, config_entry.entry_id, config_entry.data)
+    remove_obsolete_link_status_entities(hass, config_entry)
 
     hass.data.setdefault(DOMAIN, {})
     shared_meter_coordinator = hass.data[DOMAIN].get(HASS_SHARED_METER_COORDINATOR)

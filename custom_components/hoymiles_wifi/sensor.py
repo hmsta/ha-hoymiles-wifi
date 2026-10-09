@@ -248,13 +248,6 @@ HOYMILES_SENSORS = [
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     HoymilesSensorEntityDescription(
-        key="sgs_data[<inverter_count>].link_status",
-        translation_key="link_status",
-        icon="mdi:lan-connect",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        zero_is_valid=True,
-    ),
-    HoymilesSensorEntityDescription(
         key="sgs_data[<inverter_count>].warning_number",
         translation_key="inverter_warning_number",
         entity_registry_enabled_default=False,
@@ -378,13 +371,6 @@ HOYMILES_SENSORS = [
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
-    ),
-    HoymilesSensorEntityDescription(
-        key="tgs_data[<inverter_count>].link_status",
-        translation_key="link_status",
-        icon="mdi:lan-connect",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        zero_is_valid=True,
     ),
     HoymilesSensorEntityDescription(
         key="tgs_data[<inverter_count>].warning_number",

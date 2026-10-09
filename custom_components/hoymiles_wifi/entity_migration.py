@@ -49,6 +49,27 @@ _INVERTER_BUTTON_UNIQUE_ID_PREFIXES = (
 )
 
 
+def remove_obsolete_link_status_entities(
+    hass: HomeAssistant, config_entry: ConfigEntry
+) -> None:
+    """Remove retired inverter diagnostics, including renamed and legacy entities."""
+    registry = er.async_get(hass)
+    unique_id_pattern = re.compile(
+        rf"hoymiles_{re.escape(config_entry.entry_id)}_"
+        r"(?:[0-9a-fA-F]+_)?(?:sgs_data|tgs_data)"
+        r"(?:\[\d+\])?\.link_status"
+    )
+    for entity in list(
+        er.async_entries_for_config_entry(registry, config_entry.entry_id)
+    ):
+        if (
+            entity.platform == DOMAIN
+            and entity.domain == SENSOR_DOMAIN
+            and unique_id_pattern.fullmatch(entity.unique_id)
+        ):
+            registry.async_remove(entity.entity_id)
+
+
 def migrate_meter_entity_registry_entries(
     hass: HomeAssistant, config_entry: ConfigEntry
 ) -> None:

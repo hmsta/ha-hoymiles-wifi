@@ -292,10 +292,10 @@ The card does not expose one selector per panel. It reads the panel positions fr
 
 Hoymiles serial numbers from the layout JSON are lowercased before building these entity IDs.
 
-Each configured single- or three-phase inverter also exposes a diagnostic
-`sensor.inverter_<serial>_link_status` entity containing the raw DTU value.
-This sensor is currently intended for comparison and diagnostics; the layout
-map does not use it to determine reachability.
+The raw DTU link-status field is not exposed as a Home Assistant sensor:
+it can report zero alongside updated inverter measurements. Existing link-status
+entities are removed from the entity registry when the integration next loads.
+The layout map uses the measurement and RSSI entities described below.
 
 Use the `RSSI`/`°C`/`W`/`Wh` buttons on the card to switch between inverter signal strength, temperature, current DC power, and daily DC energy. In `°C` mode, one temperature marker is shown per inverter at the same position as RSSI: green below 70°C, orange from 70°C to below 80°C, and red at 80°C or above. Missing or unavailable temperatures appear gray. Readings are converted to Celsius if needed; clicking a marker opens its temperature sensor. Set `mode: temperature` to use this mode initially. Values are rounded to whole digits. In `RSSI` mode, panels are hidden and one signal marker is shown per inverter at `signal_anchor_port` (`3` by default). If `rssi_ok_dbm` and `rssi_bad_dbm` are both set, signal icons are green at or above `rssi_ok_dbm`, orange between the thresholds, and red at or below `rssi_bad_dbm`; missing, unavailable, or non-negative RSSI values are treated as offline/gray. Without valid thresholds the card keeps its default signal coloring. In `W` mode, panel fill uses `max_watts` as the 100% reference. In `Wh` mode, panel fill uses the highest visible panel daily-energy value as the 100% reference, ignoring values below `off_threshold_watts` so ghost production stays dark/off.
 

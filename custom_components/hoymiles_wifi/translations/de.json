@@ -136,9 +136,6 @@
       "signal_strength": {
         "name": "Signalstärke"
       },
-      "link_status": {
-        "name": "Verbindungsstatus"
-      },
       "location": {
         "name": "Standort"
       },

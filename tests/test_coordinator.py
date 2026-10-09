@@ -4,7 +4,7 @@ from dataclasses import replace
 import inspect
 from types import SimpleNamespace
 
-from homeassistant.const import CONF_HOST, EntityCategory
+from homeassistant.const import CONF_HOST
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from hoymiles_wifi.protobuf import RealDataNew_pb2
 import pytest
@@ -680,60 +680,11 @@ def test_inverter_signal_strength_is_exposed_as_numeric_sensor() -> None:
     assert entity.native_value == -86
 
 
-def test_inverter_link_status_is_exposed_as_raw_diagnostic_sensor() -> None:
-    """Test raw link status, including zero, is published without smoothing."""
-    description = next(
-        description
-        for description in HOYMILES_SENSORS
-        if description.key == "sgs_data[<inverter_count>].link_status"
+def test_inverter_link_status_is_not_exposed_as_sensor() -> None:
+    """Neither inverter family publishes the ambiguous raw communication flag."""
+    assert not any(
+        description.key.endswith(".link_status") for description in HOYMILES_SENSORS
     )
-    assert description.entity_category is EntityCategory.DIAGNOSTIC
-    assert description.zero_is_valid is True
-
-    config_entry = SimpleNamespace(
-        entry_id="entry-a",
-        data={CONF_DTU_SERIAL_NUMBER: "4121a01953c8"},
-    )
-    coordinator = SimpleNamespace(
-        data=SimpleNamespace(
-            sgs_data=[
-                SimpleNamespace(
-                    serial_number=22134652556250,
-                    link_status=1,
-                ),
-            ]
-        ),
-        startup_refresh_pending=False,
-    )
-    entity = HoymilesDataSensorEntity(
-        config_entry,
-        replace(
-            description,
-            key="sgs_data[0].link_status",
-            serial_number="1421a01a53da",
-        ),
-        coordinator,
-    )
-
-    assert entity.native_value == 1
-
-    coordinator.data.sgs_data[0].link_status = 0
-    entity.update_state_value()
-
-    assert entity.native_value == 0
-
-
-def test_three_phase_inverter_link_status_sensor_is_defined() -> None:
-    """Test three-phase inverters expose the same raw diagnostic field."""
-    description = next(
-        description
-        for description in HOYMILES_SENSORS
-        if description.key == "tgs_data[<inverter_count>].link_status"
-    )
-
-    assert description.translation_key == "link_status"
-    assert description.entity_category is EntityCategory.DIAGNOSTIC
-    assert description.zero_is_valid is True
 
 
 def test_pv_sensor_reads_real_data_by_serial_and_port_not_stored_index() -> None:
@@ -982,7 +933,6 @@ def test_empty_inverter_telemetry_with_rssi_and_recovery(
         for field in ("power", "voltage", "current")
     ]
     signal = sensor(f"{inverter_field}[0].modulation_index_signal")
-    link = sensor(f"{inverter_field}[0].link_status", zero_is_valid=True)
     energy = sensor("pv_data[0].energy_total", port_number=3, energy=True)
     assert [entity.native_value for entity in measurements] == [
         6528, 4995, 470, 1699, 502, 339
@@ -997,11 +947,10 @@ def test_empty_inverter_telemetry_with_rssi_and_recovery(
     pv.serial_number = serial
     pv.port_number = 3
     for _ in range(3):
-        for entity in [*measurements, signal, link, energy]:
+        for entity in [*measurements, signal, energy]:
             entity.update_state_value()
         assert [entity.native_value for entity in measurements] == [None] * 6
         assert signal.native_value == -95
-        assert link.native_value == failed_link_status
         assert energy.native_value == 123458
 
     inverter.active_power = 6528
@@ -1009,13 +958,12 @@ def test_empty_inverter_telemetry_with_rssi_and_recovery(
     inverter.temperature = 478
     inverter.link_status = 1
     pv.power, pv.voltage, pv.current, pv.energy_total = 1700, 497, 342, 123485
-    for entity in [*measurements, signal, link, energy]:
+    for entity in [*measurements, signal, energy]:
         entity.update_state_value()
     assert [entity.native_value for entity in measurements] == [
         6528, 4998, 478, 1700, 497, 342
     ]
     assert signal.native_value == -95
-    assert link.native_value == 1
     assert energy.native_value == 123485
 
 
