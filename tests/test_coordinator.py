@@ -2,7 +2,7 @@
 
 from dataclasses import replace
 import inspect
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 
 from homeassistant.const import CONF_HOST
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -182,6 +182,9 @@ async def test_coordinator_retains_values_and_marks_dtu_after_partial_poll() -> 
     assert coordinator.data is previous
     assert coordinator._real_data_poll_successful is False
 
+    assert coordinator._startup_refresh_pending is False
+    assert coordinator._last_real_data_poll_monotonic == 123.0
+
 
 @pytest.mark.asyncio
 async def test_coordinator_updates_fresh_pages_and_retains_only_missing_records() -> None:
@@ -285,6 +288,8 @@ async def test_coordinator_first_incomplete_poll_raises_update_failed() -> None:
         await HoymilesRealDataUpdateCoordinator._async_update_data(coordinator)
 
     assert coordinator._real_data_poll_successful is False
+    assert coordinator._startup_refresh_pending is False
+    assert coordinator._last_real_data_poll_monotonic == 123.0
 
 
 @pytest.mark.asyncio
@@ -410,6 +415,94 @@ def test_next_staggered_refresh_uses_startup_epoch_and_slot() -> None:
     assert _next_staggered_refresh_time(1496.0, 1120.0, 300.0, 75.0) == 1496.0
 
 
+def _scheduler_for_test(entry, entries, domain_data, now=1000.0):
+    """Drive the real scheduling methods with a controllable monotonic clock."""
+    clock = [now]
+    scheduled = []
+
+    def call_at(when, callback):
+        scheduled.append(when)
+        return SimpleNamespace(cancel=lambda: None)
+
+    entry.pref_disable_polling = False
+    hass = SimpleNamespace(
+        loop=SimpleNamespace(time=lambda: clock[0], call_at=call_at),
+        data=domain_data,
+        config_entries=SimpleNamespace(async_entries=lambda domain: entries),
+    )
+    coordinator = SimpleNamespace(
+        hass=hass,
+        _hass=hass,
+        config_entry=entry,
+        _config_entry=entry,
+        _update_interval_seconds=300.0,
+        _startup_refresh_pending=True,
+        _last_real_data_poll_monotonic=None,
+        _unsub_refresh=None,
+        _async_unsub_refresh=lambda: None,
+        _handle_staggered_refresh_interval=lambda: None,
+    )
+    for name in ("_stagger_epoch", "_schedule_refresh", "schedule_startup_refresh"):
+        setattr(
+            coordinator, name,
+            MethodType(getattr(HoymilesRealDataUpdateCoordinator, name), coordinator),
+        )
+    return coordinator, clock, scheduled
+
+
+def test_all_dtus_poll_immediately_once_then_stagger() -> None:
+    """First snapshots have no delay; subsequent requests respect each interval."""
+    entries = [_entry(str(i), f"4121a01953c{i}") for i in range(5)]
+    domain_data = {}
+    for i, entry in enumerate(entries):
+        entry.data["startup_cooldown"] = 120  # Old saved settings have no effect.
+        coordinator, clock, scheduled = _scheduler_for_test(
+            entry, entries, domain_data
+        )
+        coordinator.schedule_startup_refresh()
+        coordinator.schedule_startup_refresh()
+        assert scheduled == [1000.0]
+
+        coordinator._startup_refresh_pending = False
+        coordinator._last_real_data_poll_monotonic = 1000.0
+        clock[0] = 1002.0  # First request finished.
+        coordinator._schedule_refresh()
+        first_regular_poll = 1300.0 + i * 60.0
+        assert scheduled[-1] == first_regular_poll
+
+        coordinator._last_real_data_poll_monotonic = first_regular_poll
+        clock[0] = first_regular_poll + 2.0
+        coordinator._schedule_refresh()
+        assert scheduled[-1] == first_regular_poll + 300.0
+
+
+def test_reloaded_dtu_polls_immediately_with_existing_stagger_epoch() -> None:
+    """An old shared epoch must not push a reloaded DTU's initial poll back."""
+    entries = [_entry(str(i), f"4121a01953c{i}") for i in range(5)]
+    domain_data = {}
+    original, _, _ = _scheduler_for_test(entries[0], entries, domain_data)
+    original.schedule_startup_refresh()
+    reloaded, clock, scheduled = _scheduler_for_test(
+        entries[4], entries, domain_data, now=2000.0
+    )
+    reloaded.schedule_startup_refresh()
+    assert scheduled == [2000.0]
+    reloaded._startup_refresh_pending = False
+    reloaded._last_real_data_poll_monotonic = 2000.0
+    clock[0] = 2002.0
+    reloaded._schedule_refresh()
+    assert scheduled[-1] == 2440.0
+
+
+def test_immediate_startup_respects_disabled_polling() -> None:
+    """The one-time startup request must respect HA's disable-polling option."""
+    entry = _entry("0", "4121a01953c0")
+    coordinator, _, scheduled = _scheduler_for_test(entry, [entry], {})
+    entry.pref_disable_polling = True
+    coordinator.schedule_startup_refresh()
+    assert scheduled == []
+
+
 def test_real_data_scheduler_does_not_call_private_ha_refresh_wrapper() -> None:
     """Test staggered refresh scheduling avoids HA private coordinator helpers."""
     source = inspect.getsource(HoymilesRealDataUpdateCoordinator._schedule_refresh)
@@ -445,7 +538,7 @@ def test_staggered_refresh_handler_requests_public_refresh_task() -> None:
 
 
 def test_sensor_reports_unknown_before_first_real_data_refresh() -> None:
-    """Test delayed startup polling does not publish fake zero sensor values."""
+    """Waiting for the first response must not publish fake zero sensor values."""
     config_entry = SimpleNamespace(
         entry_id="entry-a",
         data={CONF_DTU_SERIAL_NUMBER: "4121a01953c8"},

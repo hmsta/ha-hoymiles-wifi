@@ -33,7 +33,6 @@ from .const import (
     CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
     CONF_METER_TYPE,
     CONF_PORTS,
-    CONF_STARTUP_COOLDOWN,
     CONF_THREE_PHASE_INVERTERS,
     CONF_TIMEOUT,
     CONF_UPDATE_INTERVAL,
@@ -42,14 +41,12 @@ from .const import (
     CONFIG_VERSION,
     DEFAULT_METER_ENERGY_CONSISTENCY_TOLERANCE,
     DEFAULT_TIMEOUT_SECONDS,
-    DEFAULT_STARTUP_COOLDOWN_SECONDS,
     DEFAULT_UPDATE_INTERVAL_SECONDS,
     DOMAIN,
     METER_TYPE_AUTO,
     METER_TYPE_SINGLE_PHASE,
     METER_TYPE_THREE_PHASE,
     MIN_UPDATE_INTERVAL_SECONDS,
-    MIN_STARTUP_COOLDOWN_SECONDS,
     MIN_METER_ENERGY_CONSISTENCY_TOLERANCE,
     MIN_TIMEOUT_SECONDS,
 )
@@ -85,15 +82,6 @@ DATA_SCHEMA = vol.Schema(
         ): vol.All(
             vol.Coerce(int),
             vol.Range(min=timedelta(seconds=MIN_TIMEOUT_SECONDS).seconds),
-        ),
-        vol.Optional(
-            CONF_STARTUP_COOLDOWN,
-            default=timedelta(seconds=DEFAULT_STARTUP_COOLDOWN_SECONDS).seconds,
-        ): vol.All(
-            vol.Coerce(int),
-            vol.Range(
-                min=timedelta(seconds=MIN_STARTUP_COOLDOWN_SECONDS).seconds
-            ),
         ),
         vol.Optional(CONF_METER_TYPE, default=METER_TYPE_AUTO): vol.In(
             [METER_TYPE_AUTO, METER_TYPE_SINGLE_PHASE, METER_TYPE_THREE_PHASE]
@@ -613,9 +601,6 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL_SECONDS
             )
             timeout = user_input.get(CONF_TIMEOUT, DEFAULT_TIMEOUT_SECONDS)
-            startup_cooldown = user_input.get(
-                CONF_STARTUP_COOLDOWN, DEFAULT_STARTUP_COOLDOWN_SECONDS
-            )
             meter_type = user_input.get(CONF_METER_TYPE, METER_TYPE_AUTO)
             meter_energy_consistency_tolerance = user_input.get(
                 CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
@@ -666,7 +651,6 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                         CONF_IS_ENCRYPTED: is_encrypted,
                         CONF_ENC_RAND: enc_rand,
                         CONF_TIMEOUT: timeout,
-                        CONF_STARTUP_COOLDOWN: startup_cooldown,
                         CONF_DTU_LOCATION: "",
                         CONF_INVERTER_LOCATIONS: claimed_locations,
                         CONF_INVERTER_PHASES: claimed_phases,
@@ -699,12 +683,6 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
             )
 
             timeout = user_input.get(CONF_TIMEOUT, DEFAULT_TIMEOUT_SECONDS)
-            startup_cooldown = user_input.get(
-                CONF_STARTUP_COOLDOWN,
-                entry.data.get(
-                    CONF_STARTUP_COOLDOWN, DEFAULT_STARTUP_COOLDOWN_SECONDS
-                ),
-            )
             meter_type = user_input.get(CONF_METER_TYPE, METER_TYPE_AUTO)
             meter_energy_consistency_tolerance = user_input.get(
                 CONF_METER_ENERGY_CONSISTENCY_TOLERANCE,
@@ -800,7 +778,6 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                     CONF_IS_ENCRYPTED: is_encrypted,
                     CONF_ENC_RAND: enc_rand,
                     CONF_TIMEOUT: timeout,
-                    CONF_STARTUP_COOLDOWN: startup_cooldown,
                     CONF_DTU_LOCATION: dtu_location,
                     CONF_INVERTER_LOCATIONS: _filter_metadata_map(
                         inverter_locations, inverter_serials
@@ -938,20 +915,6 @@ class HoymilesInverterConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                     ): vol.All(
                         vol.Coerce(int),
                         vol.Range(min=timedelta(seconds=MIN_TIMEOUT_SECONDS).seconds),
-                    ),
-                    vol.Optional(
-                        CONF_STARTUP_COOLDOWN,
-                        default=entry.data.get(
-                            CONF_STARTUP_COOLDOWN,
-                            DEFAULT_STARTUP_COOLDOWN_SECONDS,
-                        ),
-                    ): vol.All(
-                        vol.Coerce(int),
-                        vol.Range(
-                            min=timedelta(
-                                seconds=MIN_STARTUP_COOLDOWN_SECONDS
-                            ).seconds
-                        ),
                     ),
                     vol.Optional(
                         CONF_METER_TYPE,

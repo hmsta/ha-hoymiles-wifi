@@ -41,11 +41,11 @@ If the meter should be moved to another DTU, remove the meter device from the cu
 
 ### Real-Data Startup Staggering
 
-Real-data polling can be delayed at Home Assistant startup or integration reload with the `Startup cooldown (seconds)` config option. Existing entries that do not have this value stored use the default of `120` seconds.
+At Home Assistant startup or integration reload, every DTU is polled once immediately to populate its real-data sensors. The former `Startup cooldown (seconds)` option has been removed; previously saved cooldown values are ignored.
 
-After the startup cooldown, DTU real-data polls are staggered evenly across the configured update interval. For example, four DTUs with a 300 second update interval poll about 75 seconds apart, while each individual DTU still waits 300 seconds between its own real-data requests.
+After that first attempt, DTU real-data polls are staggered evenly across the configured update interval. For example, five DTUs with a 300 second update interval poll about 60 seconds apart. Each DTU waits at least its configured interval before the next scheduled poll, so joining its staggered slot can add up to one interval to the first follow-up wait. Failed initial polls also retry on this schedule without delaying other DTUs.
 
-This reduces startup bursts and gives shared meter data more frequent combined updates without polling any single DTU more often than its configured interval. Config and app-info refreshes are not staggered by this setting.
+This gives shared meter data more frequent combined updates without polling any single DTU more often than its configured interval. Initial readings can still arrive at slightly different times while network requests complete, but there is no deliberate startup delay or stagger. Config and app-info refreshes are not staggered by this setting.
 
 ### Inverter Ownership Moves Between DTUs
 

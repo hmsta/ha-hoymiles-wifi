@@ -298,11 +298,9 @@ class HoymilesRealDataUpdateCoordinator(HoymilesDataUpdateCoordinator):
         dtu: DTU,
         config_entry: ConfigEntry,
         update_interval: timedelta | None,
-        startup_cooldown: timedelta,
         shared_meter_coordinator=None,
     ) -> None:
         """Initialize the real data coordinator."""
-        self._startup_cooldown = startup_cooldown
         self._startup_refresh_pending = True
         self._last_real_data_poll_monotonic: float | None = None
         self._real_data_poll_successful: bool | None = None
@@ -311,7 +309,7 @@ class HoymilesRealDataUpdateCoordinator(HoymilesDataUpdateCoordinator):
 
     @callback
     def _schedule_refresh(self) -> None:
-        """Schedule real-data refreshes with startup cooldown and DTU staggering."""
+        """Poll once immediately, then use the normal staggered DTU schedule."""
         if self._update_interval_seconds is None:
             return
 
@@ -336,18 +334,13 @@ class HoymilesRealDataUpdateCoordinator(HoymilesDataUpdateCoordinator):
         epoch = self._stagger_epoch()
 
         if self._startup_refresh_pending:
-            earliest_refresh = now + self._startup_cooldown.total_seconds()
-            if earliest_refresh <= epoch + interval_seconds:
-                next_refresh = max(earliest_refresh, epoch + slot_offset)
-            else:
-                next_refresh = _next_staggered_refresh_time(
-                    earliest_refresh,
-                    epoch,
-                    interval_seconds,
-                    slot_offset,
-                )
+            # Every DTU needs a first snapshot before its sensors can contribute
+            # to totals. Do not spread these first requests across the interval.
+            next_refresh = now
         else:
-            last_poll = self._last_real_data_poll_monotonic or now
+            last_poll = self._last_real_data_poll_monotonic
+            if last_poll is None:
+                last_poll = now
             earliest_refresh = max(now, last_poll + interval_seconds)
             next_refresh = _next_staggered_refresh_time(
                 earliest_refresh,
@@ -377,13 +370,13 @@ class HoymilesRealDataUpdateCoordinator(HoymilesDataUpdateCoordinator):
 
     @callback
     def schedule_startup_refresh(self) -> None:
-        """Ensure the delayed first real-data refresh is scheduled."""
+        """Ensure the immediate first real-data refresh is scheduled once."""
         if self._unsub_refresh is None:
             self._schedule_refresh()
 
     @property
     def startup_refresh_pending(self) -> bool:
-        """Return whether the delayed first real-data refresh has not run yet."""
+        """Return whether the first real-data refresh has not run yet."""
         return self._startup_refresh_pending
 
     @property
@@ -396,7 +389,7 @@ class HoymilesRealDataUpdateCoordinator(HoymilesDataUpdateCoordinator):
         domain_data = self._hass.data.setdefault(DOMAIN, {})
         return domain_data.setdefault(
             HASS_REAL_DATA_STAGGER_EPOCH,
-            self._hass.loop.time() + self._startup_cooldown.total_seconds(),
+            self._hass.loop.time(),
         )
 
     async def _async_update_data(self):
