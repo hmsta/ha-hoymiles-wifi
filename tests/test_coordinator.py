@@ -427,6 +427,7 @@ def _scheduler_for_test(entry, entries, domain_data, now=1000.0):
     entry.pref_disable_polling = False
     hass = SimpleNamespace(
         loop=SimpleNamespace(time=lambda: clock[0], call_at=call_at),
+        is_stopping=False,
         data=domain_data,
         config_entries=SimpleNamespace(async_entries=lambda domain: entries),
     )
@@ -437,6 +438,7 @@ def _scheduler_for_test(entry, entries, domain_data, now=1000.0):
         _config_entry=entry,
         _update_interval_seconds=300.0,
         _startup_refresh_pending=True,
+        _shutdown_requested=False,
         _last_real_data_poll_monotonic=None,
         _unsub_refresh=None,
         _async_unsub_refresh=lambda: None,
@@ -511,30 +513,54 @@ def test_real_data_scheduler_does_not_call_private_ha_refresh_wrapper() -> None:
     assert "_handle_staggered_refresh_interval" in source
 
 
-def test_staggered_refresh_handler_requests_public_refresh_task() -> None:
-    """Test scheduled refreshes are dispatched through async_request_refresh."""
+def test_staggered_refresh_handler_uses_entry_background_task() -> None:
+    """Polls must be excluded from startup waits and owned by the config entry."""
 
-    class FakeHass:
+    class FakeEntry:
+        entry_id = "entry-a"
+        pref_disable_polling = False
+
         def __init__(self) -> None:
             self.created_tasks = []
 
-        def async_create_task(self, coroutine):
-            self.created_tasks.append(coroutine)
+        def async_create_background_task(self, hass, coroutine, name):
+            self.created_tasks.append((hass, name))
             coroutine.close()
 
     async def refresh():
         return None
 
     coordinator = SimpleNamespace(
-        hass=FakeHass(),
+        hass=SimpleNamespace(is_stopping=False),
+        _config_entry=FakeEntry(),
+        _shutdown_requested=False,
         _unsub_refresh=lambda: None,
-        async_request_refresh=refresh,
+        async_refresh=refresh,
     )
 
     HoymilesRealDataUpdateCoordinator._handle_staggered_refresh_interval(coordinator)
 
     assert coordinator._unsub_refresh is None
-    assert len(coordinator.hass.created_tasks) == 1
+    assert coordinator._config_entry.created_tasks == [
+        (coordinator.hass, "hoymiles_wifi real data entry-a")
+    ]
+
+
+@pytest.mark.parametrize("shutdown, stopping, disabled", [
+    (True, False, False), (False, True, False), (False, False, True),
+])
+def test_staggered_poll_does_not_restart_after_unload_or_stop(
+    shutdown, stopping, disabled
+) -> None:
+    """A queued callback cannot start another read after polling is stopped."""
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(is_stopping=stopping),
+        _config_entry=SimpleNamespace(pref_disable_polling=disabled),
+        _shutdown_requested=shutdown,
+        _unsub_refresh=lambda: None,
+    )
+    HoymilesRealDataUpdateCoordinator._handle_staggered_refresh_interval(coordinator)
+    assert coordinator._unsub_refresh is None
 
 
 def test_sensor_reports_unknown_before_first_real_data_refresh() -> None:

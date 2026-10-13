@@ -43,6 +43,8 @@ If the meter should be moved to another DTU, remove the meter device from the cu
 
 At Home Assistant startup or integration reload, every DTU is polled once immediately to populate its real-data sensors. The former `Startup cooldown (seconds)` option has been removed; previously saved cooldown values are ignored.
 
+Initial real-data, configuration, app-information and energy-storage reads run in background tasks, so slow or offline DTUs do not hold up Home Assistant startup. Sensors receive data when the requests finish; failed reads are retried on their coordinator's normal polling schedule. Background reads are cancelled and scheduled polling is stopped when the integration unloads.
+
 After that first attempt, DTU real-data polls are staggered evenly across the configured update interval. For example, five DTUs with a 300 second update interval poll about 60 seconds apart. Each DTU waits at least its configured interval before the next scheduled poll, so joining its staggered slot can add up to one interval to the first follow-up wait. Failed initial polls also retry on this schedule without delaying other DTUs.
 
 This gives shared meter data more frequent combined updates without polling any single DTU more often than its configured interval. Initial readings can still arrive at slightly different times while network requests complete, but there is no deliberate startup delay or stagger. Config and app-info refreshes are not staggered by this setting.

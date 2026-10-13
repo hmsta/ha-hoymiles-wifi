@@ -282,7 +282,10 @@ class HoymilesDataUpdateCoordinator(DataUpdateCoordinator):
             config_entry.data.get(CONF_HOST),
         )
 
-        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=update_interval)
+        super().__init__(
+            hass, _LOGGER, config_entry=config_entry,
+            name=DOMAIN, update_interval=update_interval,
+        )
 
     def get_dtu(self) -> DTU:
         """Get the DTU object."""
@@ -310,6 +313,8 @@ class HoymilesRealDataUpdateCoordinator(HoymilesDataUpdateCoordinator):
     @callback
     def _schedule_refresh(self) -> None:
         """Poll once immediately, then use the normal staggered DTU schedule."""
+        if self._shutdown_requested or self.hass.is_stopping:
+            return
         if self._update_interval_seconds is None:
             return
 
@@ -364,9 +369,20 @@ class HoymilesRealDataUpdateCoordinator(HoymilesDataUpdateCoordinator):
 
     @callback
     def _handle_staggered_refresh_interval(self) -> None:
-        """Request a scheduled refresh without relying on HA private helpers."""
+        """Poll without holding up HA startup; cancel the task on entry unload."""
         self._unsub_refresh = None
-        self.hass.async_create_task(self.async_request_refresh())
+        if self._shutdown_requested or self.hass.is_stopping:
+            return
+        if self._config_entry.pref_disable_polling:
+            return
+        self._config_entry.async_create_background_task(
+            self.hass,
+            # async_request_refresh's debouncer can spawn a startup-tracked
+            # child task even when its caller is a background task. Our timer
+            # already controls cadence; async_refresh serializes refreshes.
+            self.async_refresh(),
+            f"{DOMAIN} real data {self._config_entry.entry_id}",
+        )
 
     @callback
     def schedule_startup_refresh(self) -> None:
@@ -438,7 +454,7 @@ class HoymilesConfigUpdateCoordinator(HoymilesDataUpdateCoordinator):
         response = await self._dtu.async_get_config()
 
         if not response:
-            _LOGGER.debug("Unable to retrieve config data. Inverter might be offline.")
+            raise UpdateFailed("Unable to retrieve DTU configuration")
 
         return response
 
@@ -462,9 +478,7 @@ class HoymilesAppInfoUpdateCoordinator(HoymilesDataUpdateCoordinator):
                 )
 
         if not response:
-            _LOGGER.debug(
-                "Unable to retrieve app information data. Inverter might be offline."
-            )
+            raise UpdateFailed("Unable to retrieve DTU app information")
         return response
 
 
@@ -531,7 +545,5 @@ class HoymilesEnergyStorageUpdateCoordinator(HoymilesDataUpdateCoordinator):
                 responses.append(storage_data)
 
         if not responses:
-            _LOGGER.debug(
-                "Unable to retrieve energy storage data. Inverter might be offline."
-            )
+            raise UpdateFailed("Unable to retrieve energy storage data")
         return responses

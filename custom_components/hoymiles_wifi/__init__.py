@@ -562,10 +562,18 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
 
     if single_phase_inverters or three_phase_inverters or meters:
         data_coordinator.schedule_startup_refresh()
-        await config_coordinator.async_config_entry_first_refresh()
-        await app_info_update_coordinator.async_config_entry_first_refresh()
+        for coordinator in (config_coordinator, app_info_update_coordinator):
+            config_entry.async_create_background_task(
+                hass,
+                coordinator.async_refresh(),
+                f"{DOMAIN} initial {type(coordinator).__name__} {config_entry.entry_id}",
+            )
     if hybrid_inverters:
-        await energy_storage_data_coordinator.async_config_entry_first_refresh()
+        config_entry.async_create_background_task(
+            hass,
+            energy_storage_data_coordinator.async_refresh(),
+            f"{DOMAIN} initial energy storage {config_entry.entry_id}",
+        )
         hass.services.async_register(
             domain=DOMAIN,
             service="set_bms_mode",
